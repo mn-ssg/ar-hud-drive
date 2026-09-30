@@ -51,7 +51,7 @@ export function buildRoute(geo){
   return {
     plane, ll, pts, cum, len:cum[cum.length-1], man, time:Number(p0.totalTime) || 0,
     // 경로를 받은 뒤 따로 채운다. state: loading | ok | fail
-    limits:null, limitState:'', lanes:null, laneState:''
+    limits:null, limitState:'', lanesNl:null, lanesOsm:null, laneState:''
   };
 }
 

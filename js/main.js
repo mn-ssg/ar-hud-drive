@@ -1,13 +1,14 @@
 /* ============================================================
    main.js — 실제 도로용 AR-HUD 시작점
    · 시작 화면(앱 키 · 목적지) → 카메라 · GPS → TMAP 경로 → HUD
-   · 제한속도(TMAP 도로 매칭)와 차선 수(OSM)는 안내를 먼저 시작하고 뒤에서 채운다
+   · 제한속도(TMAP 도로 매칭)와 차선 수(표준노드링크 → OSM)는 안내를 먼저 시작하고 뒤에서 채운다
    · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널
    ============================================================ */
 import {HUD_FPS, OFF_ROUTE} from './config.js';
 import {$, store} from './util.js';
 import {searchPlaces, fetchRoute, fetchSpeedLimits} from './tmap.js';
 import {fetchLaneRuns} from './osm.js';
+import {nodelinkRuns, knownRatio} from './lanes.js';
 import {buildRoute, runAt} from './route.js';
 import {createSpeedEstimator, createSmoother} from './speed.js';
 import {createNav} from './nav.js';
@@ -25,8 +26,16 @@ async function loadRoute(from){
   const route = buildRoute(await fetchRoute(A.key, from, A.dest));
   route.limitState = route.laneState = 'loading';
   fetchSpeedLimits(A.key, route).then(r => { route.limits = r; route.limitState = 'ok'; }, () => { route.limitState = 'fail'; });
-  fetchLaneRuns(route).then(r => { route.lanes = r; route.laneState = 'ok'; }, () => { route.laneState = 'fail'; });
+  fillLanes(route);
   return route;
+}
+
+// 차선 수: 표준노드링크(국가 공공데이터) 먼저, 모르는 구간이 5% 넘게 남으면 OSM으로 채운다
+async function fillLanes(route){
+  try{ route.lanesNl = await nodelinkRuns(route); }catch(e){}
+  if(knownRatio(route.lanesNl, route.len) >= .95){ route.laneState = 'ok'; return; }
+  try{ route.lanesOsm = await fetchLaneRuns(route); route.laneState = 'ok'; }
+  catch(e){ route.laneState = route.lanesNl ? 'ok' : 'fail'; }
 }
 
 /* ============================================================
@@ -59,17 +68,18 @@ function frame(now){
   const N = nav.N, R = N.route;
   if(N.sim && R) nav.simStep(now);
   const s = R ? nav.currentS(now) : null, onRoute = s !== null && N.fix && N.fix.off <= OFF_ROUTE;
-  const limit = onRoute ? runAt(R.limits, s) : null, lanes = onRoute ? runAt(R.lanes, s) : null;
+  const limit = onRoute ? runAt(R.limits, s) : null;
+  const nl = onRoute ? runAt(R.lanesNl, s) : null, lanes = nl || (onRoute ? runAt(R.lanesOsm, s) : null);
   const kmh = smoothKmh(N.pos ? (N.pos.v || 0)*3.6 : 0, now);
   const st = drawHud(now, {route:R, s, offSince:N.offSince, kmh, limit, lanes});
-  drawPanel(now, s, st, limit, lanes);
+  drawPanel(now, s, st, limit, lanes, nl ? '노드링크' : 'OSM');
 }
 
 /* ---------- 정보 패널 (시연·확인용, HUD 아님) ---------- */
 let panelT = 0;
 const km = m => m >= 1000 ? (m/1000).toFixed(1) + 'km' : Math.max(0, Math.round(m)) + 'm';
 const STATE_WORD = {loading:'불러오는 중', fail:'못 받음'};
-function drawPanel(now, s, st, limit, lanes){
+function drawPanel(now, s, st, limit, lanes, laneSrc){
   if($('#panel').hidden || now - panelT < 250) return;
   panelT = now;
   const N = nav.N, R = N.route;
@@ -79,7 +89,7 @@ function drawPanel(now, s, st, limit, lanes){
   if(N.fix) parts.push('경로와 차이 ' + Math.round(N.fix.off) + 'm');
   if(R){
     parts.push(limit ? '제한 ' + limit + 'km/h' : '제한속도 ' + (STATE_WORD[R.limitState] || '정보 없음'));
-    parts.push(lanes ? lanes + '차로 (OSM)' : '차선 수 ' + (STATE_WORD[R.laneState] || '정보 없음 → 기본 3차로'));
+    parts.push(lanes ? `${lanes}차로 (${laneSrc})` : '차선 수 ' + (STATE_WORD[R.laneState] || '정보 없음 → 기본 3차로'));
   }
   if(N.sim) parts.push('가상 주행');
   else if(A.gps) parts.push('GPS 오차 ' + Math.round(A.gps.acc) + 'm');
