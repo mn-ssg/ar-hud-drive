@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>차선 인식 실험</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+  :root{ --ink:#eaf6ff; --sub:#9fb0c0; --bg:#0b0d10; --card:#161b22; --line:#2a323c; --ok:#3ddc84; --warn:#ffb020; --font:"Pretendard Variable","Apple SD Gothic Neo",sans-serif; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:var(--font); }
+  body{ display:flex; flex-direction:column; padding:calc(env(safe-area-inset-top,0px) + 10px) calc(env(safe-area-inset-right,0px) + 12px) calc(env(safe-area-inset-bottom,0px) + 10px) calc(env(safe-area-inset-left,0px) + 12px); gap:10px; }
+  h1{ margin:0; font-size:16px; } h1 small{ color:var(--sub); font-weight:500; }
+  #stage{ position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:10px; overflow:hidden; }
+  #stage canvas{ position:absolute; inset:0; width:100%; height:100%; }
+  #video{ display:none; }
+  .row{ display:flex; flex-wrap:wrap; gap:6px; }
+  button, label.btn{ font:inherit; font-size:13.5px; font-weight:600; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:9px 12px; cursor:pointer; }
+  label.btn input{ display:none; }
+  #info{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:6px; }
+  .cell{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .cell b{ display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+  .cell span{ font-size:12px; color:var(--sub); }
+  #pos{ position:relative; height:10px; background:#222a33; border-radius:5px; margin-top:6px; }
+  #posDot{ position:absolute; top:-3px; width:16px; height:16px; margin-left:-8px; border-radius:50%; background:var(--ok); left:50%; }
+  #msg{ font-size:13px; color:var(--sub); min-height:1em; margin:0; }
+  #msg.bad{ color:#ff6a6a; }
+</style>
+</head>
+<body>
+  <h1>차선 인식 실험 <small>· 실험용 (본 앱 아님) · TwinLiteNet</small></h1>
+  <div id="stage"><canvas id="view" width="640" height="360"></canvas><canvas id="mask" width="640" height="360"></canvas></div>
+  <video id="video" playsinline muted></video>
+  <div class="row">
+    <button id="camBtn">카메라로 시작</button>
+    <label class="btn">주행 영상 고르기<input id="file" type="file" accept="video/*"></label>
+    <button id="centerBtn">가운데 맞추기</button>
+    <button id="maskBtn">표시 끄기</button>
+  </div>
+  <div id="info">
+    <div class="cell"><span>처리 속도</span><b id="fps">–</b><span id="ms">–</span></div>
+    <div class="cell"><span>계산 장치</span><b id="backend">–</b></div>
+    <div class="cell"><span>내 차로 양쪽 선</span><b id="lines">–</b><span id="types">–</span></div>
+    <div class="cell"><span>차로 안 위치 (왼쪽 ← → 오른쪽)</span><div id="pos"><div id="posDot"></div></div></div>
+    <div class="cell"><span>차로 변경 감지</span><b id="changes">0</b><span id="lastChange">–</span></div>
+  </div>
+  <p id="msg">카메라로 시작하거나 찍어 둔 주행 영상을 고르세요. 첫 실행은 모델(1.8MB)을 받느라 조금 걸려요.</p>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.all.min.js"></script>
+<script type="module" src="lane.js"></script>
+</body>
+</html>
