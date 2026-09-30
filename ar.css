@@ -1,0 +1,72 @@
+/* ============================================================
+   ar.css — 카메라 화면 · HUD 위치 · 시작 화면 · 정보 패널
+   HUD 모양은 시뮬레이터(hud.css)와 같게 둔다
+   ============================================================ */
+
+:root{
+  --ink:#16202b; --sub:#5b6673; --rule:#d5dae0; --btn:#1d2a38;
+  --font:"Pretendard Variable","Pretendard","IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+}
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; overflow:hidden; background:#0b0d10; color:var(--ink); font-family:var(--font); }
+button{ font:inherit; color:inherit; cursor:pointer; }
+[hidden]{ display:none !important; }
+
+/* ---------- 실제 도로 ---------- */
+#cam{ position:fixed; inset:0; width:100%; height:100%; object-fit:cover; background:#0b0d10; }
+/* HUD 뒤쪽만 살짝 어둡게: 낮에 밝은 도로 위에서도 HUD 빛이 보이도록 */
+#scrim{ position:fixed; left:0; right:0; bottom:0; height:48%; pointer-events:none;
+  background:linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.42)); }
+
+/* ---------- HUD: 앞유리 아래쪽 한 영역 ---------- */
+#hudWrap{ position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 3vh); transform:translateX(-50%);
+  width:min(560px, 62vw); pointer-events:none; }
+@media (orientation:portrait){ #hudWrap{ width:94vw; bottom:calc(env(safe-area-inset-bottom,0px) + 10vh); } }
+#hudWrap svg{ display:block; width:100%; height:auto; overflow:visible; mix-blend-mode:screen; filter:drop-shadow(0 0 3px rgba(255,255,255,.16)); }
+.hud-t{ font-family:var(--font); }
+.tnum{ font-variant-numeric:tabular-nums; }
+
+@keyframes hudHalo{ 0%{ opacity:.55; r:18; } 100%{ opacity:0; r:34; } }
+#nowHalo.on{ animation:hudHalo 1s ease-out infinite; }
+@keyframes hudFlow{ to{ stroke-dashoffset:-38; } }
+#moveArrow.flow{ animation:hudFlow .7s linear infinite; }
+@media (prefers-reduced-motion: reduce){
+  #nowHalo.on{ animation:none; opacity:0; }
+  #moveArrow.flow{ animation:none; }
+}
+
+/* ---------- 정보 패널 (HUD 아님: 밝은 카드) ---------- */
+#panel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 12px); left:calc(env(safe-area-inset-left,0px) + 12px);
+  max-width:min(360px, 80vw); background:rgba(255,255,255,.92); border-radius:10px; padding:10px 12px; font-size:13px; }
+#panel p{ margin:0; line-height:1.55; }
+#pNext{ font-weight:600; }
+#pMeta{ color:var(--sub); font-variant-numeric:tabular-nums; }
+#panel .row{ display:flex; gap:6px; margin-top:8px; }
+#panel .btn{ padding:6px 10px; font-size:12.5px; }
+
+/* ---------- 시작 화면 ---------- */
+#start{ position:fixed; inset:0; overflow:auto; display:grid; place-items:center; padding:20px;
+  padding-top:calc(env(safe-area-inset-top,0px) + 20px); padding-bottom:calc(env(safe-area-inset-bottom,0px) + 20px); }
+.card{ background:#fff; border-radius:14px; padding:22px; width:100%; max-width:440px; box-shadow:0 12px 40px rgba(0,0,0,.35); }
+.card h1{ margin:0 0 16px; font-size:20px; letter-spacing:-.02em; }
+.field{ display:block; font-size:12.5px; font-weight:600; color:var(--sub); margin-bottom:12px; }
+.field input{ display:block; width:100%; margin-top:6px; font:inherit; font-size:16px; font-weight:400; color:var(--ink);
+  border:1px solid var(--rule); border-radius:8px; padding:10px 12px; background:#fff; }
+.search{ display:flex; gap:6px; margin-top:6px; }
+.search input{ margin-top:0; flex:1; min-width:0; }
+.btn{ border:1px solid var(--rule); background:#f6f7f9; border-radius:8px; padding:10px 14px; font-size:14px; font-weight:600; }
+.btn.primary{ background:var(--btn); border-color:var(--btn); color:#fff; }
+.btn:disabled{ opacity:.4; cursor:default; }
+.btn:focus-visible, input:focus-visible{ outline:2px solid var(--btn); outline-offset:2px; }
+.card .row{ display:flex; gap:8px; margin-top:4px; }
+.card .row .btn{ flex:1; }
+
+#results{ list-style:none; margin:0 0 12px; padding:0; max-height:36vh; overflow:auto; }
+#results:empty{ display:none; }
+#results button{ display:block; width:100%; text-align:left; border:0; border-top:1px solid var(--rule); background:none; padding:9px 2px; }
+#results li:first-child button{ border-top:0; }
+#results b{ display:block; font-size:14.5px; font-weight:600; }
+#results span{ font-size:12.5px; color:var(--sub); }
+#chosen{ margin:0 0 12px; font-size:14px; font-weight:600; }
+#msg{ margin:10px 0 0; font-size:13px; color:var(--sub); line-height:1.55; min-height:1em; }
+#msg.bad{ color:#d64545; }

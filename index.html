@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>AR-HUD 실제 주행</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="ar.css">
+</head>
+<body>
+
+<!-- 실제 도로: 휴대폰 뒷카메라 -->
+<video id="cam" playsinline muted autoplay></video>
+<div id="scrim"></div>
+
+<!-- 우리 HUD v1.3 (hud.js와 같은 구성) -->
+<div id="hudWrap" hidden>
+  <svg viewBox="0 0 520 270" aria-hidden="true">
+    <defs>
+      <linearGradient id="fadeTop" gradientUnits="userSpaceOnUse" x1="0" y1="104" x2="0" y2="126">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity="1"/>
+      </linearGradient>
+      <mask id="roadMask" maskUnits="userSpaceOnUse" x="0" y="0" width="520" height="270">
+        <rect x="0" y="104" width="520" height="132" fill="url(#fadeTop)"/>
+      </mask>
+      <linearGradient id="laneGrad" gradientUnits="userSpaceOnUse" x1="0" y1="228" x2="0" y2="112">
+        <stop offset="0" stop-color="#46e6ff" stop-opacity=".42"/><stop offset=".55" stop-color="#46e6ff" stop-opacity=".16"/><stop offset="1" stop-color="#46e6ff" stop-opacity=".04"/>
+      </linearGradient>
+      <linearGradient id="arrowGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0">
+        <stop id="agA" offset="0" stop-color="#3ddc84" stop-opacity=".15"/><stop id="agB" offset="1" stop-color="#3ddc84" stop-opacity="1"/>
+      </linearGradient>
+      <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="2.4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+
+    <g id="arHud">
+      <!-- ③ 어디로: 미니 도로 -->
+      <g mask="url(#roadMask)">
+        <path id="roadSurf" fill="#ffffff" fill-opacity=".055"/>
+        <path id="laneFill" fill="url(#laneGrad)"/>
+        <path id="roadEdges" fill="#eaf6ff" fill-opacity=".74"/>
+        <path id="roadDash" fill="#eaf6ff" fill-opacity=".5"/>
+        <path id="pulses" fill="#46e6ff"/>
+        <path id="laneRails" fill="#46e6ff" filter="url(#glow)"/>
+        <path id="gate" filter="url(#glow)"/>
+      </g>
+      <g id="moveGrp" filter="url(#glow)">
+        <path id="moveArrow" fill="none" stroke="url(#arrowGrad)" stroke-width="6" stroke-linecap="round"/>
+        <path id="moveHead" stroke="none"/>
+      </g>
+      <g id="ego" transform="translate(260 221)" fill="#eaf6ff">
+        <path d="M-15 4 Q-15 -3 -11 -4 L-7 -10 Q-6 -12 -3 -12 H3 Q6 -12 7 -10 L11 -4 Q15 -3 15 4 V7 Q15 9 13 9 H-13 Q-15 9 -15 7 Z" fill-opacity=".92"/>
+        <rect x="-12" y="0" width="5" height="2.6" rx="1.3" fill="#ff6a6a"/><rect x="7" y="0" width="5" height="2.6" rx="1.3" fill="#ff6a6a"/>
+        <path d="M-5 -9 H5 L8 -4 H-8 Z" fill="#0b0d10" fill-opacity=".55"/>
+      </g>
+
+      <!-- ① 지금 할 한 가지 -->
+      <g id="act" filter="url(#glow)">
+        <circle id="nowHalo" cx="0" cy="0" r="21" fill="none" stroke-width="3" opacity="0"/>
+        <circle id="nowRing" cx="0" cy="0" r="19" fill="none" stroke-width="2"/>
+        <g id="nowIcon" fill="none" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+          <g id="icoRight"><path d="M-6 13 V4 Q-6 -4 5 -9 M-1 -13 L8 -9 L4 -1"/></g>
+          <g id="icoLeft"><path d="M6 13 V4 Q6 -4 -5 -9 M1 -13 L-8 -9 L-4 -1"/></g>
+          <g id="icoUp"><path d="M0 13 V-12 M-8 -4 L0 -13 L8 -4"/></g>
+          <g id="icoUturn"><path d="M7 13 V-3 Q7 -12 -1 -12 Q-8 -12 -8 -4 V5 M-13 0 L-8 6 L-3 0"/></g>
+          <g id="icoCheck"><path d="M-10 0 L-3 7 L10 -7"/></g>
+          <g id="icoPause"><path d="M-4.5 -8 V8 M4.5 -8 V8"/></g>
+        </g>
+        <text id="nowText" class="hud-t" x="32" y="11" font-size="31" font-weight="700" letter-spacing="-.5"></text>
+      </g>
+      <!-- ② 언제 -->
+      <g id="cd" filter="url(#glow)">
+        <rect id="cdBg" x="200" y="64" width="120" height="6" rx="3" fill-opacity=".16"/>
+        <rect id="cdBar" x="200" y="64" width="120" height="6" rx="3"/>
+      </g>
+      <!-- ④ 속도 -->
+      <g opacity=".8">
+        <text class="hud-t tnum" x="260" y="258" fill="#ffffff" text-anchor="middle"><tspan id="spdA" font-size="17" font-weight="600">0</tspan><tspan font-size="10" dx="3" fill-opacity=".8">km/h</tspan></text>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<!-- 시연·확인용 정보 (HUD가 아님). 화면을 누르면 숨김/보임 -->
+<div id="panel" hidden>
+  <p id="pNext"></p>
+  <p id="pMeta"></p>
+  <div class="row">
+    <button class="btn" id="changeBtn">목적지 변경</button>
+    <button class="btn" id="hideBtn">숨기기</button>
+  </div>
+</div>
+
+<!-- 시작 화면 -->
+<div id="start">
+  <div class="card">
+    <h1>AR-HUD 실제 주행</h1>
+
+    <label class="field">TMAP 앱 키
+      <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="SK open API에서 발급받은 appKey">
+    </label>
+
+    <label class="field">목적지
+      <div class="search">
+        <input id="destInput" type="search" autocomplete="off" placeholder="예: 계원예술대학교">
+        <button class="btn" id="searchBtn">검색</button>
+      </div>
+    </label>
+    <ul id="results"></ul>
+    <p id="chosen" hidden></p>
+
+    <div class="row">
+      <button class="btn primary" id="goBtn" disabled>안내 시작</button>
+      <button class="btn" id="simBtn" disabled>가상 주행으로 확인</button>
+    </div>
+    <p id="msg" role="status"></p>
+  </div>
+</div>
+
+<script src="ar.js"></script>
+</body>
+</html>
