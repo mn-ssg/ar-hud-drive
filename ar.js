@@ -41,7 +41,7 @@ const S = {
 async function tmapError(r){
   let t = '';
   try{ const j = await r.json(); t = (j.error && (j.error.message || j.error.code)) || j.errorMessage || ''; }catch(e){}
-  if(r.status === 401 || r.status === 403) return '앱 키를 확인해 주세요 (' + r.status + ')';
+  if(r.status === 401 || r.status === 403){ $('#keyField').hidden = false; return '앱 키를 확인해 주세요 (' + r.status + ')'; }
   return 'TMAP 오류 ' + r.status + (t ? ': ' + t : '');
 }
 function netError(e){
@@ -403,12 +403,16 @@ function setDest(p){
   $('#goBtn').disabled = $('#simBtn').disabled = false;
 }
 
-$('#keyInput').value = store.get('tmapKey') || '';
+// 주소 끝에 #key=앱키 를 붙여 한 번 열면 이 휴대폰에 저장된다. # 뒤는 서버로 가지 않아서 GitHub에도 남지 않는다
+const urlKey = (new URLSearchParams(location.hash.slice(1)).get('key') || '').trim();
+if(urlKey) store.set('tmapKey', urlKey);
+$('#keyInput').value = urlKey || store.get('tmapKey') || '';
+$('#keyField').hidden = !!$('#keyInput').value;   // 저장된 키가 있으면 입력칸을 숨긴다
 try{ const d = JSON.parse(store.get('dest') || 'null'); if(d && d.lat) setDest(d); }catch(e){}
 
 function readKey(){
   S.key = $('#keyInput').value.trim();
-  if(!S.key){ say('TMAP 앱 키를 넣어 주세요.', true); $('#keyInput').focus(); return false; }
+  if(!S.key){ say('TMAP 앱 키를 넣어 주세요.', true); $('#keyField').hidden = false; $('#keyInput').focus(); return false; }
   store.set('tmapKey', S.key); return true;
 }
 
