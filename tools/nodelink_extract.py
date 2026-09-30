@@ -10,7 +10,7 @@ nodelink_extract.py — 국가 표준노드링크(전국 SHP)에서 시험 지�
        · 경로 파일 = TMAP 자동차 경로 응답(GeoJSON)을 저장한 것
        · --area=M  : 경로들을 모두 감싸는 사각 영역 + M(m) 안의 링크를 전부 남긴다 (어느 길로 가도 됨) ← 지금 쓰는 방식
          없으면    : 경로 선에서 BUFFER_M 안의 링크만 남긴다 (파일이 작지만 다른 길로 가면 비어 있음)
-       · 결과: data/nodelink-lanes.json  (링크마다 [차로 수, [위도, 경도, 위도, 경도, …]])
+       · 결과: data/nodelink-lanes.json  (링크마다 [차로 수, 제한속도(km/h, 0=모름), [위도, 경도, 위도, 경도, …]])
 """
 import json, math, os, sys, tempfile, zipfile
 
@@ -103,12 +103,13 @@ def main():
             continue
         rec = sr.record.as_dict()
         lanes = int(rec.get('LANES') or 0)
+        spd = int(rec.get('MAX_SPD') or 0)
         lane_hist[lanes] = lane_hist.get(lanes, 0) + 1
         flat = []
         for x, y in pts:
             lon, lat = to_ll.transform(x, y)
             flat += [round(lat, 5), round(lon, 5)]      # 소수 5자리 ≈ 1m (매칭 기준 25m에 충분)
-        links.append([lanes, flat])
+        links.append([lanes, spd, flat])
 
     out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
     os.makedirs(out_dir, exist_ok=True)
@@ -117,7 +118,7 @@ def main():
         'source': '국토교통부 국가교통정보센터 전국표준노드링크 (' + os.path.basename(os.path.normpath(args[0])) + ')',
         'license': '이용허락범위 제한 없음 (공공데이터포털 15025526)',
         'note': ('시험 경로들을 감싸는 사각 영역 + ' + str(area) + 'm 안 모든 링크' if area is not None else '시험 경로 주변 ' + str(BUFFER_M) + 'm 안 링크만')
-                + '. 링크는 방향별로 따로 있고 LANES는 그 방향 차로 수',
+                + '. 링크는 방향별로 따로 있고 LANES는 그 방향 차로 수, MAX_SPD는 제한속도(km/h)',
         'links': links,
     }
     json.dump(meta, open(out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))

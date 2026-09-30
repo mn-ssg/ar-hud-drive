@@ -8,7 +8,7 @@ import {HUD_FPS, OFF_ROUTE} from './config.js';
 import {$, store} from './util.js';
 import {searchPlaces, fetchRoute, fetchSpeedLimits} from './tmap.js';
 import {fetchLaneRuns} from './osm.js';
-import {nodelinkRuns, knownRatio} from './lanes.js';
+import {nodelinkRuns, nodelinkSpeedRuns, knownRatio} from './lanes.js';
 import {buildRoute, runAt} from './route.js';
 import {createSpeedEstimator, createSmoother} from './speed.js';
 import {createNav} from './nav.js';
@@ -25,9 +25,16 @@ const nav = createNav(pos => loadRoute(pos));
 async function loadRoute(from){
   const route = buildRoute(await fetchRoute(A.key, from, A.dest));
   route.limitState = route.laneState = 'loading';
-  fetchSpeedLimits(A.key, route).then(r => { route.limits = r; route.limitState = 'ok'; }, () => { route.limitState = 'fail'; });
+  fillLimits(route);
   fillLanes(route);
   return route;
+}
+
+// 제한속도: TMAP 도로 매칭 먼저, 막히면(하루 한도 초과 등) 노드링크 제한속도로
+async function fillLimits(route){
+  try{ route.limits = await fetchSpeedLimits(A.key, route); route.limitSrc = 'TMAP'; route.limitState = 'ok'; return; }catch(e){}
+  try{ route.limits = await nodelinkSpeedRuns(route); route.limitSrc = '노드링크'; route.limitState = knownRatio(route.limits, route.len) > 0 ? 'ok' : 'fail'; }
+  catch(e){ route.limitState = 'fail'; }
 }
 
 // 차선 수: 표준노드링크(국가 공공데이터) 먼저, 모르는 구간이 5% 넘게 남으면 OSM으로 채운다
@@ -88,7 +95,7 @@ function drawPanel(now, s, st, limit, lanes, laneSrc){
   if(R && s !== null) parts.push('남은 거리 ' + km(R.len - s));
   if(N.fix) parts.push('경로와 차이 ' + Math.round(N.fix.off) + 'm');
   if(R){
-    parts.push(limit ? '제한 ' + limit + 'km/h' : '제한속도 ' + (STATE_WORD[R.limitState] || '정보 없음'));
+    parts.push(limit ? `제한 ${limit}km/h (${R.limitSrc})` : '제한속도 ' + (STATE_WORD[R.limitState] || '정보 없음'));
     parts.push(lanes ? `${lanes}차로 (${laneSrc})` : '차선 수 ' + (STATE_WORD[R.laneState] || '정보 없음 → 기본 3차로'));
   }
   if(N.sim) parts.push('가상 주행');

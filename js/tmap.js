@@ -11,7 +11,9 @@ async function fail(r){
   let t = '';
   try{ const j = await r.json(); t = (j.error && (j.error.message || j.error.code)) || j.errorMessage || ''; }catch(e){}
   const auth = r.status === 401 || r.status === 403;
-  const e = new Error(auth ? '앱 키를 확인해 주세요 (' + r.status + ')' : 'TMAP 오류 ' + r.status + (t ? ': ' + t : ''));
+  const e = new Error(auth ? '앱 키를 확인해 주세요 (' + r.status + ')'
+    : r.status === 429 ? '오늘 TMAP 무료 사용량을 다 썼어요. 내일 다시 쓸 수 있어요 (429)'   // 응답: {error:{code:'QUOTA_EXCEEDED'}}
+    : 'TMAP 오류 ' + r.status + (t ? ': ' + t : ''));
   e.auth = auth;
   return e;
 }
