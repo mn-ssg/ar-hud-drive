@@ -1,13 +1,15 @@
 """
-nodelink_extract.py — 국가 표준노드링크(전국 SHP)에서 시험 경로 주변 링크의 차로 수만 뽑아
-                      앱이 읽는 작은 JSON(data/nodelink-lanes.json)으로 만든다
+nodelink_extract.py — 국가 표준노드링크(전국 SHP)에서 시험 지역(또는 시험 경로 주변) 링크의 차로 수만 뽑아
+                      앱이 읽는 JSON(data/nodelink-lanes.json)으로 만든다
 
 자료: 국토교통부 국가교통정보센터 '전국표준노드링크' (https://www.its.go.kr/nodelink/nodelinkRef)
       이용허락범위 제한 없음 (공공데이터포털 15025526)
 
 준비:  pip install pyshp pyproj
-실행:  python3 tools/nodelink_extract.py <NODELINKDATA.zip 또는 풀어 둔 폴더> <경로.geojson> [<경로.geojson> …]
-       · 경로 파일 = TMAP 자동차 경로 응답(GeoJSON)을 저장한 것. 경로 선에서 BUFFER_M 안의 링크만 남긴다
+실행:  python3 tools/nodelink_extract.py [--area=1000] <NODELINKDATA.zip 또는 풀어 둔 폴더> <경로.geojson> [<경로.geojson> …]
+       · 경로 파일 = TMAP 자동차 경로 응답(GeoJSON)을 저장한 것
+       · --area=M  : 경로들을 모두 감싸는 사각 영역 + M(m) 안의 링크를 전부 남긴다 (어느 길로 가도 됨) ← 지금 쓰는 방식
+         없으면    : 경로 선에서 BUFFER_M 안의 링크만 남긴다 (파일이 작지만 다른 길로 가면 비어 있음)
        · 결과: data/nodelink-lanes.json  (링크마다 [차로 수, [위도, 경도, 위도, 경도, …]])
 """
 import json, math, os, sys, tempfile, zipfile
@@ -55,10 +57,12 @@ def route_lines(paths):
 
 
 def main():
-    if len(sys.argv) < 3:
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    area = next((int(a.split('=')[1]) for a in sys.argv[1:] if a.startswith('--area=')), None)
+    if len(args) < 2:
         sys.exit(__doc__)
-    shp = find_link_shp(sys.argv[1])
-    lines = route_lines(sys.argv[2:])
+    shp = find_link_shp(args[0])
+    lines = route_lines(args[1:])
 
     prj = os.path.splitext(shp)[0] + '.prj'
     crs = CRS.from_wkt(open(prj, encoding='utf-8', errors='ignore').read()) if os.path.exists(prj) else CRS.from_epsg(5186)
@@ -80,7 +84,9 @@ def main():
                 for di in range(-reach, reach + 1):
                     for dj in range(-reach, reach + 1):
                         cells.add((ci + di, cj + dj))
-    bbox = [min(xs) - BUFFER_M, min(ys) - BUFFER_M, max(xs) + BUFFER_M, max(ys) + BUFFER_M]
+    pad = area if area is not None else BUFFER_M
+    bbox = [min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad]
+    print(f'영역: {(bbox[2] - bbox[0]) / 1000:.1f}km × {(bbox[3] - bbox[1]) / 1000:.1f}km', '(사각 영역 전체)' if area is not None else f'(경로 주변 {BUFFER_M}m만)')
 
     sf = shapefile.Reader(shp, encoding=(open(os.path.splitext(shp)[0] + '.cpg').read().strip() if os.path.exists(os.path.splitext(shp)[0] + '.cpg') else 'cp949'))
     names = [f[0] for f in sf.fields[1:]]
@@ -93,7 +99,7 @@ def main():
         pts = sr.shape.points
         if len(pts) < 2:
             continue
-        if not any((int(x // CELL_M), int(y // CELL_M)) in cells for x, y in pts[:: max(1, len(pts) // 20)] + [pts[-1]]):
+        if area is None and not any((int(x // CELL_M), int(y // CELL_M)) in cells for x, y in pts[:: max(1, len(pts) // 20)] + [pts[-1]]):
             continue
         rec = sr.record.as_dict()
         lanes = int(rec.get('LANES') or 0)
@@ -101,16 +107,17 @@ def main():
         flat = []
         for x, y in pts:
             lon, lat = to_ll.transform(x, y)
-            flat += [round(lat, 6), round(lon, 6)]
+            flat += [round(lat, 5), round(lon, 5)]      # 소수 5자리 ≈ 1m (매칭 기준 25m에 충분)
         links.append([lanes, flat])
 
     out_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, 'nodelink-lanes.json')
     meta = {
-        'source': '국토교통부 국가교통정보센터 전국표준노드링크 (' + os.path.basename(sys.argv[1]) + ')',
+        'source': '국토교통부 국가교통정보센터 전국표준노드링크 (' + os.path.basename(os.path.normpath(args[0])) + ')',
         'license': '이용허락범위 제한 없음 (공공데이터포털 15025526)',
-        'note': '시험 경로 주변 ' + str(BUFFER_M) + 'm 안 링크만. 링크는 방향별로 따로 있고 LANES는 그 방향 차로 수',
+        'note': ('시험 경로들을 감싸는 사각 영역 + ' + str(area) + 'm 안 모든 링크' if area is not None else '시험 경로 주변 ' + str(BUFFER_M) + 'm 안 링크만')
+                + '. 링크는 방향별로 따로 있고 LANES는 그 방향 차로 수',
         'links': links,
     }
     json.dump(meta, open(out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))

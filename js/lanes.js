@@ -12,8 +12,9 @@ const CELL = 50;      // 가까운 도로를 빨리 찾기 위한 격자 크기(
 
 /* roads = [{ll:[[lat, lon], …], fwd, back}]
    fwd / back: 그린 방향 / 반대 방향으로 달릴 때 차선 수. null = 달릴 수 있지만 차선 수 모름, false = 그 방향으로 못 달림
-   nearM: 경로에서 이 거리(m) 안의 도로만 같은 도로로 본다 */
-export function matchLanes(route, roads, nearM = 15){
+   nearM: 경로에서 이 거리(m) 안의 도로만 같은 도로로 본다
+   farM : nearM 안에 없을 때만, 방향이 거의 같은(15° 이내) 도로를 이 거리까지 찾는다 (중앙분리대가 넓은 고속도로) */
+export function matchLanes(route, roads, nearM = 15, farM = nearM){
   const {plane, pts, cum, len} = route, grid = new Map(), key = (i, j) => i + ',' + j;
   roads.forEach(r => {
     const xy = r.ll.map(p => plane.toXY(p[0], p[1]));
@@ -32,7 +33,7 @@ export function matchLanes(route, roads, nearM = 15){
   const samples = [];
   for(let s = 0; s <= len; s += STEP){
     const p = pointAt(pts, cum, s), q = p.xy, ci = Math.floor(q[0]/CELL), cj = Math.floor(q[1]/CELL);
-    let best, bestScore = Infinity;
+    let best, bestScore = Infinity, far, farScore = Infinity;
     for(let i = ci - 1; i <= ci + 1; i++) for(let j = cj - 1; j <= cj + 1; j++){
       const list = grid.get(key(i, j)); if(!list) continue;
       for(const g of list){
@@ -40,11 +41,13 @@ export function matchLanes(route, roads, nearM = 15){
         if(!along && dh < 145) continue;                  // 가로지르는 도로
         const v = along ? g.fwd : g.back;
         if(v === false) continue;                          // 그 방향으로 못 달리는 차로(중앙분리 도로의 건너편 등)
-        const d = segDist(q, g.A, g.B); if(d > nearM) continue;
-        const score = d + (along ? dh : 180 - dh)*0.1;
-        if(score < bestScore){ bestScore = score; best = v; }
+        const d = segDist(q, g.A, g.B); if(d > farM) continue;
+        const off = along ? dh : 180 - dh, score = d + off*0.1;
+        if(d <= nearM){ if(score < bestScore){ bestScore = score; best = v; } }
+        else if(off <= 15 && score < farScore){ farScore = score; far = v; }
       }
     }
+    if(bestScore === Infinity) best = far;
     samples.push({s, v:best ? Math.min(best, MAX_LANES) : null});
   }
   return toRuns(samples, RUN_MIN_M);
@@ -69,5 +72,6 @@ export async function loadNodelink(url = 'data/nodelink-lanes.json'){
     .catch(e => { nodelink = null; throw e; });   // 실패하면 다음에 다시 시도
   return nodelink;
 }
-// 넓은 중앙분리 도로는 방향별 링크가 도로 양쪽에 따로 그려져 경로 선(도로 가운데)에서 15~20m 떨어진다. 반대 방향은 back:false로 걸러진다
-export async function nodelinkRuns(route){ return matchLanes(route, await loadNodelink(), 25); }
+// 넓은 중앙분리 도로는 방향별 링크가 도로 양쪽에 따로 그려져 경로 선(도로 가운데)에서 15~20m, 고속도로는 30~40m 떨어진다
+// 반대 방향은 back:false로 걸러진다
+export async function nodelinkRuns(route){ return matchLanes(route, await loadNodelink(), 25, 45); }
