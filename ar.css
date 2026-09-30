@@ -38,6 +38,8 @@ button{ font:inherit; color:inherit; cursor:pointer; }
 /* ---------- 정보 패널 (HUD 아님: 밝은 카드) ---------- */
 #panel{ position:fixed; top:calc(env(safe-area-inset-top,0px) + 12px); left:calc(env(safe-area-inset-left,0px) + 12px);
   max-width:min(360px, 80vw); background:rgba(255,255,255,.92); border-radius:10px; padding:10px 12px; font-size:13px; }
+/* 가로 화면: HUD가 화면 높이 대부분을 쓰므로 패널을 좁혀 ① 행동 글자를 가리지 않게 */
+@media (orientation:landscape){ #panel{ max-width:min(300px, 32vw); } }
 #panel p{ margin:0; line-height:1.55; }
 #pNext{ font-weight:600; }
 #pMeta{ color:var(--sub); font-variant-numeric:tabular-nums; }

@@ -17,7 +17,7 @@
 <video id="cam" playsinline muted autoplay></video>
 <div id="scrim"></div>
 
-<!-- 우리 HUD v1.3 (hud.js와 같은 구성) -->
+<!-- 우리 HUD v1.3 (시뮬레이터 hud.js와 같은 구성, 그리기는 js/hud.js) -->
 <div id="hudWrap" hidden>
   <svg viewBox="0 0 520 270" aria-hidden="true">
     <defs>
@@ -79,9 +79,14 @@
         <rect id="cdBg" x="200" y="64" width="120" height="6" rx="3" fill-opacity=".16"/>
         <rect id="cdBar" x="200" y="64" width="120" height="6" rx="3"/>
       </g>
-      <!-- ④ 속도 -->
-      <g opacity=".8">
-        <text class="hud-t tnum" x="260" y="258" fill="#ffffff" text-anchor="middle"><tspan id="spdA" font-size="17" font-weight="600">0</tspan><tspan font-size="10" dx="3" fill-opacity=".8">km/h</tspan></text>
+      <!-- ④ 속도 · 제한속도 (넘으면 속도 숫자가 경고색) -->
+      <g id="spdGrp" opacity=".85">
+        <text id="spdA" class="hud-t tnum" x="268" y="263" fill="#ffffff" text-anchor="end" font-size="30" font-weight="700">0</text>
+        <text class="hud-t" x="272" y="263" fill="#ffffff" fill-opacity=".75" font-size="11" font-weight="600">km/h</text>
+        <g id="limGrp" transform="translate(320 253)" display="none">
+          <circle r="14" fill="#0b0d10" fill-opacity=".45" stroke="#ff4d4d" stroke-width="3"/>
+          <text id="limT" class="hud-t tnum" y="5" fill="#ffffff" text-anchor="middle" font-size="14" font-weight="700"></text>
+        </g>
       </g>
     </g>
   </svg>
@@ -123,6 +128,6 @@
   </div>
 </div>
 
-<script src="ar.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
