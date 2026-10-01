@@ -2,7 +2,7 @@
    main.js — 실제 도로용 AR-HUD 시작점
    · 시작 화면(앱 키 · 목적지) → 카메라 · GPS → TMAP 경로 → HUD
    · 제한속도(TMAP 도로 매칭)와 차선 수(표준노드링크 → OSM)는 안내를 먼저 시작하고 뒤에서 채운다
-   · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널
+   · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널 (1초마다 주행 기록)
    ============================================================ */
 import {HUD_FPS, OFF_ROUTE} from './config.js';
 import {$, store} from './util.js';
@@ -14,6 +14,7 @@ import {createSpeedEstimator, createSmoother} from './speed.js';
 import {createNav} from './nav.js';
 import {startCamera, watchGPS, keepAwake, releaseAwake} from './device.js';
 import {initHud, resetHud, drawHud} from './hud.js';
+import {startLog, endLog, logRoute, logTick, flushLog, logStatus, hasLog, exportLog} from './log.js';
 
 const A = {key:'', dest:null, gps:null, running:false};
 const estimate = createSpeedEstimator(), smoothKmh = createSmoother(0.4);
@@ -22,11 +23,13 @@ const nav = createNav(pos => loadRoute(pos));
 /* ============================================================
    경로
    ============================================================ */
-async function loadRoute(from){
-  const route = buildRoute(await fetchRoute(A.key, from, A.dest));
+// reason: 'start' | 'reroute' (주행 기록용)
+async function loadRoute(from, reason = 'reroute'){
+  const raw = await fetchRoute(A.key, from, A.dest), route = buildRoute(raw);
   route.limitState = route.laneState = 'loading';
   fillLimits(route);
   fillLanes(route);
+  logRoute(reason, from, raw, route);
   return route;
 }
 
@@ -66,7 +69,7 @@ function waitGPS(ms){
 /* ============================================================
    매 프레임 (HUD_FPS로 제한)
    ============================================================ */
-let lastDraw = 0;
+let lastDraw = 0, lastLog = 0;
 function frame(now){
   if(!A.running) return;
   requestAnimationFrame(frame);
@@ -78,8 +81,12 @@ function frame(now){
   const limit = onRoute ? runAt(R.limits, s) : null;
   const nl = onRoute ? runAt(R.lanesNl, s) : null, lanes = nl || (onRoute ? runAt(R.lanesOsm, s) : null);
   const kmh = smoothKmh(N.pos ? (N.pos.v || 0)*3.6 : 0, now);
-  const st = drawHud(now, {route:R, s, offSince:N.offSince, kmh, limit, lanes});
-  drawPanel(now, s, st, limit, lanes, nl ? '노드링크' : 'OSM');
+  const st = drawHud(now, {route:R, s, offSince:N.offSince, kmh, limit, lanes}), laneSrc = nl ? '노드링크' : 'OSM';
+  if(now - lastLog >= 1000){
+    lastLog = now;
+    logTick({pos:N.pos, s, off:N.fix ? N.fix.off : null, limit, lanes, laneSrc, word:st.word, m:st.m, d:st.d});
+  }
+  drawPanel(now, s, st, limit, lanes, laneSrc);
 }
 
 /* ---------- 정보 패널 (시연·확인용, HUD 아님) ---------- */
@@ -100,6 +107,8 @@ function drawPanel(now, s, st, limit, lanes, laneSrc){
   }
   if(N.sim) parts.push('가상 주행');
   else if(A.gps) parts.push('GPS 오차 ' + Math.round(A.gps.acc) + 'm');
+  const L = logStatus();
+  if(L) parts.push(L.full ? '기록 공간 가득 → 지금 내보내 주세요' : `기록 ${Math.floor(L.n/60)}분 ${L.n % 60}초`);
   $('#pMeta').textContent = parts.join(' · ');
 }
 
@@ -162,13 +171,14 @@ async function begin(sim){
     startGPS();
     const from = await waitGPS(20000);
     say('경로를 받는 중…');
-    const route = await loadRoute(from);
+    startLog(A.dest, sim);
+    const route = await loadRoute(from, 'start');
     nav.start(route, sim, performance.now());
     if(!sim) nav.update(A.gps, performance.now());
     resetHud();
     $('#start').hidden = true; $('#hudWrap').hidden = false; $('#panel').hidden = false;
     keepAwake();
-    A.running = true; lastDraw = 0; requestAnimationFrame(frame);
+    A.running = true; lastDraw = lastLog = 0; requestAnimationFrame(frame);
     say('');
   }catch(e){ showError(e); }
   $('#goBtn').disabled = $('#simBtn').disabled = false;
@@ -184,10 +194,26 @@ document.addEventListener('click', e => {
 });
 $('#hideBtn').addEventListener('click', () => { $('#panel').hidden = true; });
 $('#changeBtn').addEventListener('click', () => {
-  A.running = false; nav.stop();
+  A.running = false; nav.stop(); endLog();
   $('#hudWrap').hidden = true; $('#panel').hidden = true; $('#start').hidden = false;
+  $('#oldLogBtn').hidden = !hasLog();
   releaseAwake();
 });
-document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && A.running) keepAwake(); });
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible'){ if(A.running) keepAwake(); }
+  else flushLog();   // 다른 앱으로 가거나 화면이 꺼질 때 바로 저장
+});
+window.addEventListener('pagehide', flushLog);
+
+/* ---------- 주행 기록 내보내기 (주행 중 패널 · 시작 화면) ---------- */
+// 결과는 누른 버튼 글자로 잠깐 알린다 (주행 중엔 시작 화면 안내문이 안 보여서)
+async function onExport(e){
+  const b = e.currentTarget, label = b.textContent, tell = (t, ms) => { b.textContent = t; setTimeout(() => { b.textContent = label; }, ms); };
+  try{ if(await exportLog()) tell('내보냈어요', 2000); }
+  catch(err){ tell(err.message, 2500); }
+}
+$('#logBtn').addEventListener('click', onExport);
+$('#oldLogBtn').addEventListener('click', onExport);
+$('#oldLogBtn').hidden = !hasLog();
 
 initHud();
