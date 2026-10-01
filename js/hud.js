@@ -58,8 +58,9 @@ function band(P, Nn, o0, o1){
 // 선 위 a~b(m) 짧은 조각 (점선·빛 띠·마감선용)
 function piece(P, Cm, a, b){ const S = [at(P, Cm, a), at(P, Cm, b)]; return [S, normals(S)]; }
 
-// 차선 수 n → 내 차로 왼쪽·오른쪽 차로 수. 몇 번째 차로인지는 알 수 없어서 가운데(짝수면 가운데 오른쪽)에 둔다
-const laneSplit = n => { const L = Math.floor(n/2); return [L, n - L - 1]; };
+// 차선 수 n → 내 차로 왼쪽·오른쪽에 그릴 차로 수. 몇 번째 차로인지 알 수 없어서 내 차로를 가운데 두고 양쪽을 똑같이 그린다
+// 짝수면 양쪽 바깥 차로가 반 칸씩 → 도로 전체 폭은 그대로 n차로 (예: 4차로 = 왼쪽 1.5 · 오른쪽 1.5)
+const laneSplit = n => { const k = (n - 1)/2; return [k, k]; };
 
 /* ---------- 색 · 아이콘 ---------- */
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i+2), 16));
@@ -110,7 +111,7 @@ function commitAction(next, now){
   else if(A.pend !== key){ A.pend = key; A.pendSince = now; }
 }
 
-/* v = {route, s, offSince, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리} */
+/* v = {route, s, offSince, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어} */
 export function drawHud(now, v){
   const R = v.route, s = v.s, dt = H.t ? Math.min(.25, (now - H.t)/1000) : 0;
   H.t = now;
@@ -208,5 +209,5 @@ export function drawHud(now, v){
   show(E.limGrp, !!v.limit);
   if(v.limit) text(E.limT, v.limit);
 
-  return {m, d};
+  return {m, d, word};
 }
