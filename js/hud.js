@@ -4,7 +4,7 @@
    · 시뮬레이터와 달리 주변 차 정보가 없어서 정체·뒤차·끼어들 틈 표시는 뺐다
    · 성능: 요소는 처음 한 번만 찾고, 값이 바뀐 속성만 다시 쓴다
    ============================================================ */
-import {NEAR, PASS, LANE_W as W, DEFAULT_LANES, C, FORK_LEAD, MERGE_LEAD, JCT_DRAW, LANE_LEAD} from './config.js';
+import {NEAR, PASS, LANE_W as W, DEFAULT_LANES, C, FORK_LEAD, MERGE_LEAD, JCT_DRAW, LANE_LEAD, DONE_WAIT} from './config.js';
 import {clamp, ease} from './util.js';
 
 /* ---------- 미니 도로 투영: 내 차 기준 평면 (x 오른쪽, z 앞쪽이 음수 — 시뮬레이터와 같음) ---------- */
@@ -140,7 +140,7 @@ export function initHud(){
 }
 export function resetHud(){
   const [L, R] = laneSplit(DEFAULT_LANES);
-  Object.assign(H, {route:null, manIdx:-1, doneUntil:0, fill:0, Ls:L, Rs:R, t:0,
+  Object.assign(H, {route:null, manIdx:-1, doneUntil:0, pendDone:0, fill:0, Ls:L, Rs:R, t:0,
     act:{key:'', cur:{icon:null, word:'', color:C.NOW}, since:0, pend:'', pendSince:0}});
 }
 
@@ -152,11 +152,11 @@ function commitAction(next, now){
   else if(A.pend !== key){ A.pend = key; A.pendSince = now; }
 }
 
-/* v = {route, s, offSince, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어, j: 다음 갈림·합류, dj: 그까지 거리} */
+/* v = {route, s, offSince, onTrack, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어, j: 다음 갈림·합류, dj: 그까지 거리} */
 export function drawHud(now, v){
   const R = v.route, s = v.s, dt = H.t ? Math.min(.25, (now - H.t)/1000) : 0;
   H.t = now;
-  if(R !== H.route){ H.route = R; H.manIdx = -1; }   // 경로를 다시 받으면 안내 순서도 처음부터
+  if(R !== H.route){ H.route = R; H.manIdx = -1; H.pendDone = 0; }   // 경로를 다시 받으면 안내 순서도 처음부터
   let m = null, d = Infinity, next;
   const jc = nextJct(R, s), dj = jc ? jc.s - s : Infinity, hint = nextHint(R, s), dh = hint ? hint.s - s : Infinity;
   const hintNow = hintAction(hint, dh), keep = hintNow || jctAction(jc, dj) || {icon:'icoUp', word:'유지', color:C.NOW};
@@ -164,13 +164,16 @@ export function drawHud(now, v){
   if(!R || s === null) next = {icon:'icoPause', word:'위치 대기', color:C.WARN};
   else{
     const i = R.man.findIndex(x => x.s > s - PASS);
-    if(i !== H.manIdx){ if(H.manIdx >= 0 && i > H.manIdx && !R.man[H.manIdx].arrive) H.doneUntil = now + 1400; H.manIdx = i; }
+    if(i !== H.manIdx){ if(H.manIdx >= 0 && i > H.manIdx && !R.man[H.manIdx].arrive) { H.pendDone = now + DONE_WAIT; H.pendMan = R.man[H.manIdx]; } H.manIdx = i; }
+    // 지나간 회전이 정말 됐는지: DONE_WAIT 안에 경로를 따라가고 있으면(v.onTrack) '완료', 아니면(직진해 버림 등) 안 띄움
+    if(H.pendDone){ if(v.onTrack){ H.doneUntil = now + 1400; H.pendDone = 0; } else if(now > H.pendDone) H.pendDone = 0; }
     m = i >= 0 ? R.man[i] : null;
     if(m) d = m.s - s;
     const late = m && d/m.lead <= .35;
     if(v.offSince && now - v.offSince > 1500) next = {icon:'icoPause', word:'경로 다시 찾는 중', color:C.WARN};
     else if(!m || (m.arrive && d < 30)) next = {icon:'icoCheck', word:'도착', color:C.GO};
     else if(now < H.doneUntil) next = {icon:'icoCheck', word:'완료', color:C.GO};          // 해냈다 = 늘 초록
+    else if(H.pendDone) next = {icon:dirIcon(H.pendMan), word:H.pendMan.word, color:C.NOW};   // 확인될 때까지 지금 하던 회전 그대로
     else if(m.arrive) next = keep;
     else if(d <= NEAR) next = {icon:dirIcon(m), word:m.word, color:C.NOW};
     else if(d <= m.lead) next = {icon:m.dir < 0 ? 'icoLeft' : 'icoRight', word:late ? '지금 이동' : '이동', color:late ? C.WARN : C.GO};

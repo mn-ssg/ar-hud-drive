@@ -18,6 +18,9 @@ export const OFF_ROUTE = 40;          // 경로 선에서 이만큼(m) 벗어난
 export const OFF_ROUTE_MS = 4000;     //   이 시간이 지나면 경로를 다시 받는다
 export const REROUTE_GAP_MS = 15000;  // 경로를 다시 받는 최소 간격
 export const SIM_KMH = 40;            // 가상 주행 속도
+// 회전 '완료'는 회전 지점을 지난 뒤 DONE_WAIT ms 안에 경로를 따라가고 있을 때만: 경로선 DONE_OFF m 안 + 진행 방향이 경로와 DONE_ANG° 안
+// (유턴 안내에서 직진했는데 '완료'가 뜬 문제, E17)
+export const DONE_WAIT = 3000, DONE_OFF = 15, DONE_ANG = 45;
 
 /* ---------- 도로 · 차선 ---------- */
 export const LANE_W = 3.5;            // 차로 폭(m)

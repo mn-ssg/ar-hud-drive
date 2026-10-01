@@ -4,7 +4,8 @@
    · 제한속도(TMAP 도로 매칭) · 차선 수(표준노드링크 → OSM) · 갈림 · 합류(표준노드링크)는 안내를 먼저 시작하고 뒤에서 채운다
    · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널 (1초마다 주행 기록)
    ============================================================ */
-import {HUD_FPS, OFF_ROUTE, JCT_TMAP_M} from './config.js';
+import {HUD_FPS, OFF_ROUTE, JCT_TMAP_M, DONE_OFF, DONE_ANG} from './config.js';
+import {pointAt, angleDiff} from './geo.js';
 import {$, store} from './util.js';
 import {searchPlaces, fetchRoute, fetchSpeedLimits} from './tmap.js';
 import {fetchLaneRuns} from './osm.js';
@@ -28,16 +29,17 @@ const nav = createNav(pos => loadRoute(pos));
 async function loadRoute(from, reason = 'reroute'){
   const raw = await fetchRoute(A.key, from, A.dest), route = buildRoute(raw);
   route.limitState = route.laneState = 'loading';
-  fillLimits(route);
+  fillLimits(route, reason === 'start');
   fillLanes(route);
   fillJunctions(route);
   logRoute(reason, from, raw, route);
   return route;
 }
 
-// 제한속도: TMAP 도로 매칭 먼저, 막히면(하루 한도 초과 등) 노드링크 제한속도로
-async function fillLimits(route){
-  try{ route.limits = await fetchSpeedLimits(A.key, route); route.limitSrc = 'TMAP'; route.limitState = 'ok'; return; }catch(e){}
+// 제한속도: TMAP 도로 매칭은 처음 받은 경로에서만(하루 한도가 보낸 경로 점 수로 차서 경로를 다시 받을 때마다 부르면 금방 막힘, E13 · E17)
+// 경로를 다시 받았거나 TMAP이 막히면 노드링크 제한속도로
+async function fillLimits(route, useTmap){
+  if(useTmap) try{ route.limits = await fetchSpeedLimits(A.key, route); route.limitSrc = 'TMAP'; route.limitState = 'ok'; return; }catch(e){}
   try{ route.limits = await nodelinkSpeedRuns(route); route.limitSrc = '노드링크'; route.limitState = knownRatio(route.limits, route.len) > 0 ? 'ok' : 'fail'; }
   catch(e){ route.limitState = 'fail'; }
 }
@@ -92,7 +94,9 @@ function frame(now){
   const limit = onRoute ? runAt(R.limits, s) : null;
   const nl = onRoute ? runAt(R.lanesNl, s) : null, lanes = nl || (onRoute ? runAt(R.lanesOsm, s) : null);
   const kmh = smoothKmh(N.pos ? (N.pos.v || 0)*3.6 : 0, now);
-  const st = drawHud(now, {route:R, s, offSince:N.offSince, kmh, limit, lanes}), laneSrc = nl ? '노드링크' : 'OSM';
+  // 회전 '완료' 확인용: 경로선 가까이 + 달리는 중이면 진행 방향이 경로 방향과 맞음
+  const P = N.pos, onTrack = !!(onRoute && N.fix.off <= DONE_OFF && !(P && P.v > 3 && P.heading != null && angleDiff(P.heading, pointAt(R.pts, R.cum, s).heading) > DONE_ANG));
+  const st = drawHud(now, {route:R, s, offSince:N.offSince, onTrack, kmh, limit, lanes}), laneSrc = nl ? '노드링크' : 'OSM';
   if(now - lastLog >= 1000){
     lastLog = now;
     logTick({pos:N.pos, s, off:N.fix ? N.fix.off : null, limit, lanes, laneSrc, word:st.word, m:st.m, d:st.d, j:st.j, dj:st.dj});
