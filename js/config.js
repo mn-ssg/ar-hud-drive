@@ -37,6 +37,10 @@ export const JCT_TMAP_M = 120;        // TMAP 안내 지점이 이 거리(m) 안
 /* ---------- TMAP 차로 안내 (turnType 52 왼쪽 차선 · 53 오른쪽 차선 · 54~63 1~10차선) ---------- */
 export const LANE_LEAD = 300;         // 차로 안내 지점 이 거리(m) 앞부터 ① 글자 + 미니 도로에 갈 차로 칠하기
 
+/* ---------- 카메라 차선 인식 (lanecam.js · laneread.js) ---------- */
+export const LANE_FPS = 5;            // 초당 최대 몇 번 차선을 읽나 (폰이 느리면 저절로 줄어듦)
+export const ROAD_SMALL = .15;        // 화면 높이 중 도로가 이보다 작게 보이면 '폰을 조금 아래로' 안내
+
 /* ---------- 화면 ---------- */
 export const HUD_FPS = 30;            // HUD를 초당 다시 그리는 횟수. 휴대폰 발열·끊김을 줄인다
 export const C = {NOW:'#46e6ff', GO:'#3ddc84', WARN:'#ffb020', DANGER:'#ff4d4d'};

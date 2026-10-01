@@ -11,6 +11,7 @@ let S = null, timer = null;
 
 const r1 = x => x == null || isNaN(x) ? null : Math.round(x*10)/10;
 const r6 = x => Math.round(x*1e6)/1e6;
+const r2 = x => x == null || isNaN(x) ? null : Math.round(x*100)/100;
 const pad = n => String(n).padStart(2, '0');
 const stamp = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 
@@ -52,14 +53,23 @@ export function endLog(){
 export function logRoute(reason, from, raw, route){
   if(S) S.routes.push({t:Date.now(), reason, from:where(from), raw, route});
 }
-// e = {pos, s, off, limit, lanes, laneSrc, word, m, d, j, dj}
+// e = {pos, s, off, limit, lanes, laneSrc, word, m, d, j, dj, cam(lanecam.js LC), camHud(HUD가 카메라 차로를 썼나)}
 export function logTick(e){
   if(!S) return;
   S.track.push(Object.assign({t:Date.now()}, where(e.pos), {
     s:r1(e.s), off:r1(e.off), lim:e.limit || null, ln:e.lanes || null, lnSrc:e.lanes ? e.laneSrc : null,
     act:e.word || '', nm:e.m ? {type:e.m.type, d:Math.round(e.d)} : null,
-    jc:e.j ? {kind:e.j.kind, side:e.j.side, d:Math.round(e.dj)} : null
+    jc:e.j ? {kind:e.j.kind, side:e.j.side, d:Math.round(e.dj)} : null,
+    cam:camOut(e.cam), camHud:e.camHud || false
   }));
+}
+
+// 카메라 차선 인식 한 줄: 확정 차로 · 이번 판정(왼쪽/오른쪽 끝까지 차로 수) · 선 개수 · 차로 안 위치 · 도로가 보인 비율 · 속도
+function camOut(c){
+  if(!c || c.state !== 'on') return c ? {st:c.state} : null;
+  const r = c.read || {};
+  return {idx:c.sure ? c.idx : null, chg:c.changes, ll:r.laneLeft ?? null, lr:r.laneRight ?? null, nl:r.left ? r.left.n : null, nr:r.right ? r.right.n : null,
+    yl:r.left ? r.left.yellow : null, pos:r2(r.pos), road:r2(r.roadFrac), ms:Math.round(c.ms), fps:r1(c.fps), be:c.backend};
 }
 
 /* ---------- 저장: 자리가 모자라면 오래된 주행부터 지운다. 이번 주행만으로도 모자라면 메모리에만 둔다 ---------- */

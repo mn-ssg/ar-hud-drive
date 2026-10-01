@@ -99,9 +99,9 @@ function nextHint(R, s){
 const hintAction = (h, dh) => !h || dh > LANE_LEAD ? null
   : {icon:h.lane === 'L' ? 'icoLeft' : h.lane === 'R' ? 'icoRight' : 'icoUp', word:h.lane === 'L' ? '왼쪽 차로' : h.lane === 'R' ? '오른쪽 차로' : h.lane + '차로', color:C.GO};
 
-// 차선 수 n → 내 차로 왼쪽·오른쪽에 그릴 차로 수. 몇 번째 차로인지 알 수 없어서 내 차로를 가운데 두고 양쪽을 똑같이 그린다
-// 짝수면 양쪽 바깥 차로가 반 칸씩 → 도로 전체 폭은 그대로 n차로 (예: 4차로 = 왼쪽 1.5 · 오른쪽 1.5)
-const laneSplit = n => { const k = (n - 1)/2; return [k, k]; };
+// 차선 수 n · 카메라로 읽은 내 차로 idx(왼쪽부터 1~, 모르면 null) → 내 차로 왼쪽·오른쪽에 그릴 차로 수
+// 알면 실제 자리에. 모르면 내 차로를 가운데 두고 양쪽을 똑같이 (D39: 짝수면 바깥 차로가 반 칸씩 → 전체 폭은 n차로)
+const laneSides = (n, idx) => idx ? [idx - 1, Math.max(n, idx) - idx] : [(n - 1)/2, (n - 1)/2];
 
 /* ---------- 색 · 아이콘 ---------- */
 const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i+2), 16));
@@ -139,7 +139,7 @@ export function initHud(){
   resetHud();
 }
 export function resetHud(){
-  const [L, R] = laneSplit(DEFAULT_LANES);
+  const [L, R] = laneSides(DEFAULT_LANES, null);
   Object.assign(H, {route:null, manIdx:-1, doneUntil:0, pendDone:0, fill:0, Ls:L, Rs:R, t:0,
     act:{key:'', cur:{icon:null, word:'', color:C.NOW}, since:0, pend:'', pendSince:0}});
 }
@@ -152,12 +152,13 @@ function commitAction(next, now){
   else if(A.pend !== key){ A.pend = key; A.pendSince = now; }
 }
 
-/* v = {route, s, offSince, onTrack, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어, j: 다음 갈림·합류, dj: 그까지 거리} */
+/* v = {route, s, offSince, onTrack, kmh, limit, lanes, laneIdx(카메라로 읽은 내 차로, 모르면 null)} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어, j: 다음 갈림·합류, dj: 그까지 거리} */
 export function drawHud(now, v){
   const R = v.route, s = v.s, dt = H.t ? Math.min(.25, (now - H.t)/1000) : 0;
   H.t = now;
   if(R !== H.route){ H.route = R; H.manIdx = -1; H.pendDone = 0; }   // 경로를 다시 받으면 안내 순서도 처음부터
   let m = null, d = Infinity, next;
+  const nL = v.lanes || DEFAULT_LANES;
   const jc = nextJct(R, s), dj = jc ? jc.s - s : Infinity, hint = nextHint(R, s), dh = hint ? hint.s - s : Infinity;
   const hintNow = hintAction(hint, dh), keep = hintNow || jctAction(jc, dj) || {icon:'icoUp', word:'유지', color:C.NOW};
 
@@ -176,6 +177,8 @@ export function drawHud(now, v){
     else if(H.pendDone) next = {icon:dirIcon(H.pendMan), word:H.pendMan.word, color:C.NOW};   // 확인될 때까지 지금 하던 회전 그대로
     else if(m.arrive) next = keep;
     else if(d <= NEAR) next = {icon:dirIcon(m), word:m.word, color:C.NOW};
+    // 카메라로 내 차로를 알고 이미 회전할 쪽 끝 차로(왼쪽 = 1차로, 오른쪽 = 맨 오른쪽)면 옮기라고 하지 않고 할 일만 (E17)
+    else if(d <= m.lead && v.laneIdx && (m.dir < 0 ? v.laneIdx === 1 : v.laneIdx >= nL)) next = {icon:dirIcon(m), word:m.word, color:C.NOW};
     else if(d <= m.lead) next = {icon:m.dir < 0 ? 'icoLeft' : 'icoRight', word:late ? '지금 이동' : '이동', color:late ? C.WARN : C.GO};
     else next = keep;
   }
@@ -204,7 +207,7 @@ export function drawHud(now, v){
   if(showTiming){ attr(E.cdBar, 'width', (120*frac).toFixed(1)); attr(E.cdBar, 'x', (260 - 60*frac).toFixed(1)); attr(E.cdBar, 'fill', tcol); attr(E.cdBg, 'fill', tcol); }
 
   /* ③ 어디로: 미니 도로 — 차선 수가 바뀌면 폭이 부드럽게 바뀐다 */
-  const [tL, tR] = laneSplit(v.lanes || DEFAULT_LANES), a = 1 - Math.exp(-dt/.35);
+  const [tL, tR] = laneSides(nL, v.laneIdx), a = 1 - Math.exp(-dt/.35);
   H.Ls += (tL - H.Ls)*a; H.Rs += (tR - H.Rs)*a;
   if(Math.abs(tL - H.Ls) < .01) H.Ls = tL;
   if(Math.abs(tR - H.Rs) < .01) H.Rs = tR;
@@ -214,8 +217,8 @@ export function drawHud(now, v){
   const P = roadPath(m, d), Cm = cumOf(P), Nn = normals(P), Lend = Cm[Cm.length-1];
   attr(E.roadSurf, 'd', band(P, Nn, xl, xr));
   attr(E.roadEdges, 'd', band(P, Nn, xl - .09, xl + .09) + band(P, Nn, xr - .09, xr + .09));
-  // 'n차로' 안내 중엔 내 차로 가정을 내려놓고 실제 차로 칸(왼쪽부터 n칸)으로 그린다
-  const nLanes = v.lanes || DEFAULT_LANES, grid = hintNow && typeof hint.lane === 'number' && hint.lane <= nLanes;
+  // 내 차로를 모를 때 'n차로' 안내 중엔 가운데 가정을 내려놓고 실제 차로 칸(왼쪽부터 n칸)으로 그린다 (알면 이미 실제 칸)
+  const nLanes = nL, grid = !v.laneIdx && hintNow && typeof hint.lane === 'number' && hint.lane <= nLanes;
   // 차로 사이 점선: 실제 이동 거리에 맞춰 흐른다 (3m 칠 · 6m 빈칸)
   const bounds = [];
   if(grid) for(let k = 1; k < nLanes; k++) bounds.push(xl + k*(xr - xl)/nLanes);
@@ -244,6 +247,7 @@ export function drawHud(now, v){
   let hf = '';
   if(hintNow){
     if(grid){ const cw = (xr - xl)/nLanes; hf = band(P, Nn, xl + (hint.lane - 1)*cw, xl + hint.lane*cw); }
+    else if(v.laneIdx && typeof hint.lane === 'number'){ const o = (hint.lane - v.laneIdx)*W; hf = band(P, Nn, o - W/2, o + W/2); }
     else if(hint.lane === 'L' && xl < -W/2 - .5) hf = band(P, Nn, xl, -W/2);
     else if(hint.lane === 'R' && xr > W/2 + .5) hf = band(P, Nn, W/2, xr);
   }
