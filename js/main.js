@@ -1,14 +1,15 @@
 /* ============================================================
    main.js — 실제 도로용 AR-HUD 시작점
    · 시작 화면(앱 키 · 목적지) → 카메라 · GPS → TMAP 경로 → HUD
-   · 제한속도(TMAP 도로 매칭)와 차선 수(표준노드링크 → OSM)는 안내를 먼저 시작하고 뒤에서 채운다
+   · 제한속도(TMAP 도로 매칭) · 차선 수(표준노드링크 → OSM) · 갈림 · 합류(표준노드링크)는 안내를 먼저 시작하고 뒤에서 채운다
    · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널 (1초마다 주행 기록)
    ============================================================ */
-import {HUD_FPS, OFF_ROUTE} from './config.js';
+import {HUD_FPS, OFF_ROUTE, JCT_TMAP_M} from './config.js';
 import {$, store} from './util.js';
 import {searchPlaces, fetchRoute, fetchSpeedLimits} from './tmap.js';
 import {fetchLaneRuns} from './osm.js';
 import {nodelinkRuns, nodelinkSpeedRuns, knownRatio} from './lanes.js';
+import {junctionsOnRoute} from './junctions.js';
 import {buildRoute, runAt} from './route.js';
 import {createSpeedEstimator, createSmoother} from './speed.js';
 import {createNav} from './nav.js';
@@ -29,6 +30,7 @@ async function loadRoute(from, reason = 'reroute'){
   route.limitState = route.laneState = 'loading';
   fillLimits(route);
   fillLanes(route);
+  fillJunctions(route);
   logRoute(reason, from, raw, route);
   return route;
 }
@@ -46,6 +48,15 @@ async function fillLanes(route){
   if(knownRatio(route.lanesNl, route.len) >= .95){ route.laneState = 'ok'; return; }
   try{ route.lanesOsm = await fetchLaneRuns(route); route.laneState = 'ok'; }
   catch(e){ route.laneState = route.lanesNl ? 'ok' : 'fail'; }
+}
+
+// 갈림 · 합류: TMAP은 합류 코드가 없고 큰길을 따라가는 갈림은 안내가 안 올 수 있어서 노드링크 도로 연결로 찾는다(E15)
+async function fillJunctions(route){
+  try{
+    route.junctions = (await junctionsOnRoute(route))
+      .map(j => Object.assign(j, {tmap:route.man.some(m => !m.arrive && Math.abs(m.s - j.s) < JCT_TMAP_M)}));
+    route.junctionState = 'ok';
+  }catch(e){ route.junctionState = 'fail'; }
 }
 
 /* ============================================================
@@ -84,7 +95,7 @@ function frame(now){
   const st = drawHud(now, {route:R, s, offSince:N.offSince, kmh, limit, lanes}), laneSrc = nl ? '노드링크' : 'OSM';
   if(now - lastLog >= 1000){
     lastLog = now;
-    logTick({pos:N.pos, s, off:N.fix ? N.fix.off : null, limit, lanes, laneSrc, word:st.word, m:st.m, d:st.d});
+    logTick({pos:N.pos, s, off:N.fix ? N.fix.off : null, limit, lanes, laneSrc, word:st.word, m:st.m, d:st.d, j:st.j, dj:st.dj});
   }
   drawPanel(now, s, st, limit, lanes, laneSrc);
 }
@@ -104,6 +115,8 @@ function drawPanel(now, s, st, limit, lanes, laneSrc){
   if(R){
     parts.push(limit ? `제한 ${limit}km/h (${R.limitSrc})` : '제한속도 ' + (STATE_WORD[R.limitState] || '정보 없음'));
     parts.push(lanes ? `${lanes}차로 (${laneSrc})` : '차선 수 ' + (STATE_WORD[R.laneState] || '정보 없음 → 기본 3차로'));
+    if(st.j) parts.push(st.j.kind === 'fork' ? `갈림 ${km(st.dj)} (내 길 ${st.j.side > 0 ? '왼쪽' : '오른쪽'})` : `합류 ${km(st.dj)} (${st.j.side < 0 ? '왼쪽' : '오른쪽'}${st.j.join ? '으로 들어감' : '에서 들어옴'})`);
+    else if(R.junctionState !== 'ok') parts.push('갈림·합류 ' + (STATE_WORD[R.junctionState] || '정보 없음'));
   }
   if(N.sim) parts.push('가상 주행');
   else if(A.gps) parts.push('GPS 오차 ' + Math.round(A.gps.acc) + 'm');

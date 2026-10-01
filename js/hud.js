@@ -1,10 +1,10 @@
 /* ============================================================
    hud.js — 카메라 화면 위 HUD (시뮬레이터 hud.js drawAr와 같은 시각 언어)
-   ① 지금 할 한 가지 ② 언제 ③ 어디로(미니 도로, 차선 수 반영) ④ 속도 · 제한속도
+   ① 지금 할 한 가지 ② 언제 ③ 어디로(미니 도로, 차선 수 · 갈림 · 합류 반영) ④ 속도 · 제한속도
    · 시뮬레이터와 달리 주변 차 정보가 없어서 정체·뒤차·끼어들 틈 표시는 뺐다
    · 성능: 요소는 처음 한 번만 찾고, 값이 바뀐 속성만 다시 쓴다
    ============================================================ */
-import {NEAR, PASS, LANE_W as W, DEFAULT_LANES, C} from './config.js';
+import {NEAR, PASS, LANE_W as W, DEFAULT_LANES, C, FORK_LEAD, MERGE_LEAD, JCT_DRAW, LANE_LEAD} from './config.js';
 import {clamp, ease} from './util.js';
 
 /* ---------- 미니 도로 투영: 내 차 기준 평면 (x 오른쪽, z 앞쪽이 음수 — 시뮬레이터와 같음) ---------- */
@@ -58,6 +58,47 @@ function band(P, Nn, o0, o1){
 // 선 위 a~b(m) 짧은 조각 (점선·빛 띠·마감선용)
 function piece(P, Cm, a, b){ const S = [at(P, Cm, a), at(P, Cm, b)]; return [S, normals(S)]; }
 
+/* ---------- 갈림 · 합류의 다른 길: 길가(side 쪽)에서 22° 벌어지는 45m 도로 (미니 도로 폭 ±7m 안에 들어오게) ----------
+   갈림 = 앞으로 갈라져 나가는 길, 합류 = 뒤에서 비스듬히 들어오는 길. 폭은 그 길의 차로 수(최대 3) */
+const JCT_ANG = 22*Math.PI/180, JCT_LEN = 45;
+function jctStub(P, Cm, dj, j, xl, xr){
+  const A = at(P, Cm, dj), B = at(P, Cm, dj + 1), l = Math.hypot(B[0]-A[0], B[1]-A[1]) || 1, t = [(B[0]-A[0])/l, (B[1]-A[1])/l], n = [-t[1], t[0]];
+  const sg = j.side, wb = W*Math.min(3, j.lanes[1] || 1), o = (sg > 0 ? xr : xl) - sg*wb/2, S0 = [A[0] + n[0]*o, A[1] + n[1]*o];
+  const c = Math.cos(JCT_ANG), sn = Math.sin(JCT_ANG);
+  // 갈림: 앞으로(t) · 바깥(n·sg)으로, 합류: 뒤로(−t) · 바깥으로
+  const u = j.kind === 'fork' ? [t[0]*c + n[0]*sg*sn, t[1]*c + n[1]*sg*sn] : [-t[0]*c + n[0]*sg*sn, -t[1]*c + n[1]*sg*sn];
+  // 합류 길은 뒤(나에게 가까운 쪽)로 그려져 원근으로 크게 퍼지므로, 합류 점 거리의 60%까지만 (HUD 밖으로 안 나가게)
+  const L = j.kind === 'fork' ? JCT_LEN : Math.min(JCT_LEN, dj*.6), Q = [];
+  for(let k = 0; k < L; k += 5) Q.push([S0[0] + u[0]*k, S0[1] + u[1]*k]);
+  Q.push([S0[0] + u[0]*L, S0[1] + u[1]*L]);
+  const Nq = normals(Q);
+  return {surf:band(Q, Nq, -wb/2, wb/2), edges:band(Q, Nq, -wb/2 - .09, -wb/2 + .09) + band(Q, Nq, wb/2 - .09, wb/2 + .09)};
+}
+// 경로 위 s 다음의 갈림 · 합류 (지나고 PASS m까지는 그대로)
+function nextJct(R, s){
+  const J = R && R.junctions; if(!J || s === null) return null;
+  for(const j of J) if(j.s > s - PASS) return j;
+  return null;
+}
+// ① '유지' 대신: 갈림이면 내 길 쪽 '↖/↗ 유지'(D31), 합류면 '합류'(내가 들어감) / '합류 주의'(다른 길이 들어옴). TMAP 안내가 가까우면 TMAP을 따른다
+function jctAction(j, dj){
+  if(!j || j.tmap || dj < -PASS) return null;
+  if(j.kind === 'fork') return dj <= FORK_LEAD ? {icon:j.side > 0 ? 'icoLeft' : 'icoRight', word:'유지', color:C.NOW} : null;
+  if(dj > MERGE_LEAD) return null;
+  if(j.join) return {icon:j.side < 0 ? 'icoLeft' : 'icoRight', word:'합류', color:C.WARN};
+  return {icon:j.side < 0 ? 'icoMergeL' : 'icoMergeR', word:'합류 주의', color:C.WARN};
+}
+
+// TMAP 차로 안내: 다음 것 (지나고 PASS m까지는 그대로)
+function nextHint(R, s){
+  const L = R && R.laneHints; if(!L || s === null) return null;
+  for(const h of L) if(h.s > s - PASS) return h;
+  return null;
+}
+// ①: 갈 차로를 초록으로. 몇 번째 차로는 내가 어디 있는지 몰라 방향 아이콘 대신 ↑
+const hintAction = (h, dh) => !h || dh > LANE_LEAD ? null
+  : {icon:h.lane === 'L' ? 'icoLeft' : h.lane === 'R' ? 'icoRight' : 'icoUp', word:h.lane === 'L' ? '왼쪽 차로' : h.lane === 'R' ? '오른쪽 차로' : h.lane + '차로', color:C.GO};
+
 // 차선 수 n → 내 차로 왼쪽·오른쪽에 그릴 차로 수. 몇 번째 차로인지 알 수 없어서 내 차로를 가운데 두고 양쪽을 똑같이 그린다
 // 짝수면 양쪽 바깥 차로가 반 칸씩 → 도로 전체 폭은 그대로 n차로 (예: 4차로 = 왼쪽 1.5 · 오른쪽 1.5)
 const laneSplit = n => { const k = (n - 1)/2; return [k, k]; };
@@ -67,11 +108,11 @@ const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i+2), 16));
 const mix = (a, b, t) => { const A = hexRgb(a), B = hexRgb(b); return '#' + A.map((v, i) => Math.round(v + (B[i]-v)*t).toString(16).padStart(2, '0')).join(''); };
 const timeColor = fr => fr >= .5 ? C.GO : fr >= .2 ? mix(C.WARN, C.GO, (fr-.2)/.3) : mix(C.DANGER, C.WARN, fr/.2);
 const dirIcon = m => !m ? 'icoUp' : m.arrive ? 'icoCheck' : m.ang >= 180 ? 'icoUturn' : m.dir < 0 ? 'icoLeft' : 'icoRight';
-const ICONS = ['icoRight', 'icoLeft', 'icoUp', 'icoUturn', 'icoCheck', 'icoPause'];
+const ICONS = ['icoRight', 'icoLeft', 'icoUp', 'icoUturn', 'icoCheck', 'icoPause', 'icoMergeR', 'icoMergeL'];
 
 /* ---------- 요소 · 바뀐 값만 쓰기 ---------- */
 const E = {};
-const IDS = ['act', 'nowText', 'nowIcon', 'nowRing', 'nowHalo', 'cd', 'cdBar', 'cdBg', 'roadSurf', 'roadEdges', 'roadDash', 'laneFill', 'laneRails',
+const IDS = ['act', 'nowText', 'nowIcon', 'nowRing', 'nowHalo', 'cd', 'cdBar', 'cdBg', 'roadSurf', 'roadEdges', 'roadDash', 'laneFill', 'laneRails', 'jctSurf', 'jctEdges', 'jctWarn', 'hintFill',
   'pulses', 'gate', 'moveArrow', 'moveHead', 'arrowGrad', 'agA', 'agB', 'spdGrp', 'spdA', 'limGrp', 'limT', ...ICONS];
 const written = new WeakMap();
 function attr(el, k, v){
@@ -111,12 +152,14 @@ function commitAction(next, now){
   else if(A.pend !== key){ A.pend = key; A.pendSince = now; }
 }
 
-/* v = {route, s, offSince, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어} */
+/* v = {route, s, offSince, kmh, limit, lanes} → {m: 다음 안내 지점, d: 남은 거리, word: ①에 보인 단어, j: 다음 갈림·합류, dj: 그까지 거리} */
 export function drawHud(now, v){
   const R = v.route, s = v.s, dt = H.t ? Math.min(.25, (now - H.t)/1000) : 0;
   H.t = now;
   if(R !== H.route){ H.route = R; H.manIdx = -1; }   // 경로를 다시 받으면 안내 순서도 처음부터
   let m = null, d = Infinity, next;
+  const jc = nextJct(R, s), dj = jc ? jc.s - s : Infinity, hint = nextHint(R, s), dh = hint ? hint.s - s : Infinity;
+  const hintNow = hintAction(hint, dh), keep = hintNow || jctAction(jc, dj) || {icon:'icoUp', word:'유지', color:C.NOW};
 
   if(!R || s === null) next = {icon:'icoPause', word:'위치 대기', color:C.WARN};
   else{
@@ -128,10 +171,10 @@ export function drawHud(now, v){
     if(v.offSince && now - v.offSince > 1500) next = {icon:'icoPause', word:'경로 다시 찾는 중', color:C.WARN};
     else if(!m || (m.arrive && d < 30)) next = {icon:'icoCheck', word:'도착', color:C.GO};
     else if(now < H.doneUntil) next = {icon:'icoCheck', word:'완료', color:C.GO};          // 해냈다 = 늘 초록
-    else if(m.arrive) next = {icon:'icoUp', word:'유지', color:C.NOW};
+    else if(m.arrive) next = keep;
     else if(d <= NEAR) next = {icon:dirIcon(m), word:m.word, color:C.NOW};
     else if(d <= m.lead) next = {icon:m.dir < 0 ? 'icoLeft' : 'icoRight', word:late ? '지금 이동' : '이동', color:late ? C.WARN : C.GO};
-    else next = {icon:'icoUp', word:'유지', color:C.NOW};
+    else next = keep;
   }
 
   /* ① 지금 할 한 가지 */
@@ -168,18 +211,40 @@ export function drawHud(now, v){
   const P = roadPath(m, d), Cm = cumOf(P), Nn = normals(P), Lend = Cm[Cm.length-1];
   attr(E.roadSurf, 'd', band(P, Nn, xl, xr));
   attr(E.roadEdges, 'd', band(P, Nn, xl - .09, xl + .09) + band(P, Nn, xr - .09, xr + .09));
+  // 'n차로' 안내 중엔 내 차로 가정을 내려놓고 실제 차로 칸(왼쪽부터 n칸)으로 그린다
+  const nLanes = v.lanes || DEFAULT_LANES, grid = hintNow && typeof hint.lane === 'number' && hint.lane <= nLanes;
   // 차로 사이 점선: 실제 이동 거리에 맞춰 흐른다 (3m 칠 · 6m 빈칸)
   const bounds = [];
-  for(let j = 0; j < H.Ls - .1; j++) bounds.push(-(W/2 + j*W));
-  for(let j = 0; j < H.Rs - .1; j++) bounds.push(W/2 + j*W);
+  if(grid) for(let k = 1; k < nLanes; k++) bounds.push(xl + k*(xr - xl)/nLanes);
+  else{
+    for(let j = 0; j < H.Ls - .1; j++) bounds.push(-(W/2 + j*W));
+    for(let j = 0; j < H.Rs - .1; j++) bounds.push(W/2 + j*W);
+  }
   let dash = ''; const ph = s === null ? 0 : (s % 9);
   for(let L = 9 - ph; L < Lend - 3; L += 9){ const [S2, N2] = piece(P, Cm, L, L + 3); for(const x of bounds) dash += band(S2, N2, x - .075, x + .075); }
   attr(E.roadDash, 'd', dash);
+  // 갈림 · 합류: 다른 길을 길가에 그린다. 합류는 주황 가장자리(주의)
+  // 미니 도로는 60m 넘으면 위쪽 몇 픽셀에 몰려 안 보이므로, 앞당겨 그린다: 300m → 55m에서 보이기 시작해 다가오고 28m부터 실제 거리
+  let js = '', je = '', jw = '';
+  const dv = Math.min(dj, 25 + .1*dj);
+  if(jc && dj > 2 && dj < JCT_DRAW && dv < Lend - 5){
+    const g = jctStub(P, Cm, dv, jc, xl, xr); js = g.surf;
+    if(jc.kind === 'merge') jw = g.edges; else je = g.edges;
+  }
+  attr(E.jctSurf, 'd', js); attr(E.jctEdges, 'd', je); attr(E.jctWarn, 'd', jw);
   // 내 차로 빛: 준비 구간이면 밝게
   const fillTarget = !m ? 0 : d <= m.lead ? 1 : .6;
   H.fill += (fillTarget - H.fill)*(1 - Math.exp(-dt/.2));
-  attr(E.laneFill, 'd', band(P, Nn, -W/2, W/2)); attr(E.laneFill, 'opacity', H.fill.toFixed(3));
-  attr(E.laneRails, 'd', band(P, Nn, -W/2 - .07, -W/2 + .07) + band(P, Nn, W/2 - .07, W/2 + .07)); attr(E.laneRails, 'opacity', (.85*H.fill).toFixed(3));
+  attr(E.laneFill, 'd', band(P, Nn, -W/2, W/2)); attr(E.laneFill, 'opacity', grid ? 0 : H.fill.toFixed(3));
+  attr(E.laneRails, 'd', band(P, Nn, -W/2 - .07, -W/2 + .07) + band(P, Nn, W/2 - .07, W/2 + .07)); attr(E.laneRails, 'opacity', grid ? 0 : (.85*H.fill).toFixed(3));
+  // 갈 차로 칠하기: 왼쪽 · 오른쪽 차선이면 그쪽 차로 전부, n차선이면 그 칸
+  let hf = '';
+  if(hintNow){
+    if(grid){ const cw = (xr - xl)/nLanes; hf = band(P, Nn, xl + (hint.lane - 1)*cw, xl + hint.lane*cw); }
+    else if(hint.lane === 'L' && xl < -W/2 - .5) hf = band(P, Nn, xl, -W/2);
+    else if(hint.lane === 'R' && xr > W/2 + .5) hf = band(P, Nn, W/2, xr);
+  }
+  attr(E.hintFill, 'd', hf);
   // 흐르는 빛 띠
   let pul = '';
   if(showTiming && H.fill > .3) for(let i = 0; i < 3; i++){ const L = 7 + ((now/1000*15 + i*20) % 60); if(L < Lend - 2){ const [S2, N2] = piece(P, Cm, L, L + 1.1); pul += band(S2, N2, -1.55, 1.55); } }
@@ -209,5 +274,5 @@ export function drawHud(now, v){
   show(E.limGrp, !!v.limit);
   if(v.limit) text(E.limT, v.limit);
 
-  return {m, d, word};
+  return {m, d, word, j:jc, dj};
 }

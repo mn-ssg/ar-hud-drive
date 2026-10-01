@@ -25,6 +25,15 @@ export const DEFAULT_LANES = 3;       // 차선 수를 모르는 구간의 미�
 export const MAX_LANES = 8;
 export const RUN_MIN_M = 25;          // 제한속도·차선 수가 이보다 짧게(m) 바뀌는 조각은 무시 (교차로 안 잡음)
 
+/* ---------- 갈림 · 합류 (junctions.js · 노드링크 도로 연결로 찾음) ---------- */
+export const FORK_LEAD = 400;         // 갈림 이 거리(m) 앞부터 ① '↖ 유지 / ↗ 유지' (D31: 아이콘 = 갈 방향)
+export const MERGE_LEAD = 250;        // 합류 이 거리(m) 앞부터 ①에 '합류'(내가 들어감) / '합류 주의'(다른 길이 들어옴)
+export const JCT_DRAW = 300;          // 이 거리(m) 안의 갈림 · 합류는 미니 도로에 다른 길을 그린다
+export const JCT_TMAP_M = 120;        // TMAP 안내 지점이 이 거리(m) 안에 있으면 ①은 TMAP 안내를 따른다
+
+/* ---------- TMAP 차로 안내 (turnType 52 왼쪽 차선 · 53 오른쪽 차선 · 54~63 1~10차선) ---------- */
+export const LANE_LEAD = 300;         // 차로 안내 지점 이 거리(m) 앞부터 ① 글자 + 미니 도로에 갈 차로 칠하기
+
 /* ---------- 화면 ---------- */
 export const HUD_FPS = 30;            // HUD를 초당 다시 그리는 횟수. 휴대폰 발열·끊김을 줄인다
 export const C = {NOW:'#46e6ff', GO:'#3ddc84', WARN:'#ffb020', DANGER:'#ff4d4d'};

@@ -43,7 +43,11 @@
       <!-- ③ 어디로: 미니 도로 -->
       <g mask="url(#roadMask)">
         <path id="roadSurf" fill="#ffffff" fill-opacity=".055"/>
+        <path id="jctSurf" fill="#ffffff" fill-opacity=".08"/>
+        <path id="jctEdges" fill="#eaf6ff" fill-opacity=".74"/>
+        <path id="jctWarn" fill="#ffb020" fill-opacity=".85" filter="url(#glow)"/>
         <path id="laneFill" fill="url(#laneGrad)"/>
+        <path id="hintFill" fill="#3ddc84" fill-opacity=".3"/>
         <path id="roadEdges" fill="#eaf6ff" fill-opacity=".74"/>
         <path id="roadDash" fill="#eaf6ff" fill-opacity=".5"/>
         <path id="pulses" fill="#46e6ff"/>
@@ -71,6 +75,8 @@
           <g id="icoUturn"><path d="M7 13 V-3 Q7 -12 -1 -12 Q-8 -12 -8 -4 V5 M-13 0 L-8 6 L-3 0"/></g>
           <g id="icoCheck"><path d="M-10 0 L-3 7 L10 -7"/></g>
           <g id="icoPause"><path d="M-4.5 -8 V8 M4.5 -8 V8"/></g>
+          <g id="icoMergeR"><path d="M-3 13 V-11 M-10 -4 L-3 -12 L4 -4 M9 13 Q9 3 -2 -3"/></g>
+          <g id="icoMergeL"><path d="M3 13 V-11 M10 -4 L3 -12 L-4 -4 M-9 13 Q-9 3 2 -3"/></g>
         </g>
         <text id="nowText" class="hud-t" x="32" y="11" font-size="31" font-weight="700" letter-spacing="-.5"></text>
       </g>

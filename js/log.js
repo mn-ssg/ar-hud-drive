@@ -27,8 +27,10 @@ function routeOut(r){
   const R = r.route;
   return {t:r.t, reason:r.reason, from:r.from, len:Math.round(R.len),
     man:R.man.map(m => ({s:Math.round(m.s), type:m.type, word:m.word, desc:m.desc})),
+    laneHints:R.laneHints.map(h => ({s:Math.round(h.s), lane:h.lane, type:h.type, desc:h.desc})),
     limitSrc:R.limitSrc, limitState:R.limitState, limits:R.limits,
     laneState:R.laneState, lanesNl:R.lanesNl, lanesOsm:R.lanesOsm,
+    junctionState:R.junctionState, junctions:R.junctions && R.junctions.map(j => Object.assign({}, j, {s:Math.round(j.s)})),
     tmap:r.raw};
 }
 const out = s => ({id:s.id, start:s.start, sim:s.sim, dest:s.dest, routes:s.routes.map(routeOut), track:s.track});
@@ -50,12 +52,13 @@ export function endLog(){
 export function logRoute(reason, from, raw, route){
   if(S) S.routes.push({t:Date.now(), reason, from:where(from), raw, route});
 }
-// e = {pos, s, off, limit, lanes, laneSrc, word, m, d}
+// e = {pos, s, off, limit, lanes, laneSrc, word, m, d, j, dj}
 export function logTick(e){
   if(!S) return;
   S.track.push(Object.assign({t:Date.now()}, where(e.pos), {
     s:r1(e.s), off:r1(e.off), lim:e.limit || null, ln:e.lanes || null, lnSrc:e.lanes ? e.laneSrc : null,
-    act:e.word || '', nm:e.m ? {type:e.m.type, d:Math.round(e.d)} : null
+    act:e.word || '', nm:e.m ? {type:e.m.type, d:Math.round(e.d)} : null,
+    jc:e.j ? {kind:e.j.kind, side:e.j.side, d:Math.round(e.dj)} : null
   }));
 }
 

@@ -29,6 +29,9 @@ export function turnInfo(t){
   }
 }
 
+// TMAP 차로 안내 코드 → 'L' | 'R' | 몇 번째 차로(왼쪽부터 1). 아니면 null
+export const laneHintOf = t => t === 52 ? 'L' : t === 53 ? 'R' : t >= 54 && t <= 63 ? t - 53 : null;
+
 export function buildRoute(geo){
   const feats = (geo && geo.features) || [], ll = [], marks = [];
   feats.forEach(f => {
@@ -39,19 +42,26 @@ export function buildRoute(geo){
   if(ll.length < 2) throw new Error('경로를 받지 못했어요. 출발지와 목적지가 너무 가깝지 않은지 확인해 주세요.');
   const plane = makePlane(ll[0][1], ll[0][0]);
   const pts = ll.map(c => plane.toXY(c[1], c[0])), cum = cumulative(pts);
-  const man = []; let from = 0;
+  const man = [], laneHints = []; let from = 0, hFrom = 0;
   marks.forEach(({c, p}) => {
-    const info = turnInfo(Number(p.turnType)); if(!info) return;
+    const t = Number(p.turnType), info = turnInfo(t), lane = laneHintOf(t);
+    if(lane !== null){
+      const hit = snap(pts, cum, plane.toXY(c[1], c[0]), hFrom, pts.length - 2, true);
+      hFrom = hit.seg;
+      laneHints.push({s:hit.s, lane, type:t, desc:p.description || ''});
+    }
+    if(!info) return;
     const hit = snap(pts, cum, plane.toXY(c[1], c[0]), from, pts.length - 2, true);
     from = hit.seg;
-    man.push(Object.assign({s:hit.s, desc:p.description || '', type:Number(p.turnType)}, info));
+    man.push(Object.assign({s:hit.s, desc:p.description || '', type:t}, info));
   });
   if(!man.some(m => m.arrive)) man.push({dir:0, ang:0, word:'도착', lead:300, arrive:true, s:cum[cum.length-1], desc:'목적지', type:201});
   const p0 = (feats[0] && feats[0].properties) || {};
   return {
-    plane, ll, pts, cum, len:cum[cum.length-1], man, time:Number(p0.totalTime) || 0,
+    plane, ll, pts, cum, len:cum[cum.length-1], man, laneHints, time:Number(p0.totalTime) || 0,
     // 경로를 받은 뒤 따로 채운다. state: loading | ok | fail
-    limits:null, limitSrc:'', limitState:'', lanesNl:null, lanesOsm:null, laneState:''
+    limits:null, limitSrc:'', limitState:'', lanesNl:null, lanesOsm:null, laneState:'',
+    junctions:null, junctionState:''
   };
 }
 
