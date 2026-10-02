@@ -1,15 +1,15 @@
 /* ============================================================
-   laneread.js — 차선 분할 결과(TwinLiteNet) → 내 차로 읽기 · 추적  (화면·카메라와 무관한 순수 계산)
-   · 한 장: 보닛 위 도로 띠에서 줄마다 차선 조각을 찾아 → 내 차로 양쪽 선 · 그 바깥 선 개수 · 노란 중앙선 · 길 끝
-            → 왼쪽부터 몇 번째 차로인지 (왼쪽 끝을 봤을 때만 확실), 오른쪽 끝에서 몇 번째인지
-   · 여러 장: 최근 판정을 모아 다수결 + 선을 넘는 순간 차로 변경(±1). 선이 가려져도(앞차 · 정차) 마지막 차로를 유지
+   laneread.js — 차선(선) 목록(CLRerNet) → 내 차로 읽기 · 추적  (화면·카메라와 무관한 순수 계산, Node로 시험)
+   · 한 장: 보닛 바로 위 줄에서 선마다 x · 종류(노란 중앙선 / 흰 실선 / 흰 점선)
+            → 내 차로 양쪽 선 · 차로 안 위치 · '왼쪽 끝에서 몇 번째' · '오른쪽 끝에서 몇 번째' 근거
+   · 근거: 노란 중앙선(강함) · 내 차로 선이 점선이면 그쪽에 차로가 더 있음 · 실선 바깥에 차로 폭만큼 선이 없으면 끝 차로
+           (고속도로는 끝 차로 바깥에 갓길 끝 선이 하나 더 보여서 '차로 폭보다 가까운 선'은 갓길로 봄)
+           양쪽 다 흰 실선이면(터널 · 차로 변경 금지 구간) 끝인지 알 수 없어 근거로 안 씀
+   · 여러 장: 같은 선이 내 차 밑을 지나가면 차로 변경(±1) → 모은 근거도 한 칸 옮긴다. 선이 가려져도(앞차 · 정차) 마지막 값 유지
+   (10-01 TwinLiteNet 분할 마스크 → 줄마다 조각 세기 방식은 10-02 이 방식으로 바꿈, D45)
    ============================================================ */
 
-const BAND = 90, STEP = 4;      // 선을 찾는 띠: 보닛 바로 위 도로부터 위로 90px(모델 입력 360px 기준), 4px마다
-const SEG_MAX = 40;             // 이보다 넓은 차선 덩어리는 선이 아님(정지선 · 횡단보도)
-const EDGE_GAP = 18;            // 선 바깥으로 이만큼(px) 안에서 '달릴 수 있는 곳'이 끝나면 그 선이 길 끝
-
-// 노란 중앙선: 색상 25~65°, 채도 0.25↑, 밝기 0.35↑ (lab/lane.js와 같은 기준)
+// 노란 중앙선: 색상 25~65°, 채도 0.25↑, 밝기 0.35↑ (햇빛에 바랜 노랑도. 흰 선은 채도가 낮아 걸러짐)
 function isYellow(r, g, b){
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx/255, sat = mx ? (mx - mn)/mx : 0;
   if(v < .35 || sat < .25 || (mx !== r && mx !== g)) return false;
@@ -17,95 +17,150 @@ function isYellow(r, g, b){
   return h >= 25 && h <= 65;
 }
 
-// 보닛 위 도로가 시작하는 줄: 내 차 가운데 세로줄에서 아래부터 올라가며 처음 '달릴 수 있는 곳'
-function roadBottom(road, W, H, cx){
-  const x0 = Math.round(cx);
-  for(let y = H - 1; y > H/2; y--){ let c = 0; for(let dx = -20; dx <= 20; dx += 5) c += road[y*W + x0 + dx] || 0; if(c >= 5) return y; }
-  return H - 10;
+/* 픽셀(W×H, ch = 3 RGB 또는 4 RGBA) → probe(x, y: 0~1, r: 화면 폭 대비 선 반폭)
+   → {paint: 양옆 아스팔트보다 둘 다 확 밝은 띠(칠한 선), yellow} 또는 null(화면 밖)
+   가드레일 · 연석 · 벽 밑은 한쪽만 밝은 '경계'라서 paint가 아님 → 고속도로 갓길 끝을 차선으로 세지 않게 */
+export function paintSampler(px, W, H, ch = 4){
+  const lum = (x, y) => { const p = (y*W + x)*ch; return .299*px[p] + .587*px[p+1] + .114*px[p+2]; };
+  const med = a => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+  return (xn, yn, rn) => {
+    const R = Math.max(1, Math.round(rn*W)), x0 = Math.round(xn*W), y = Math.round(yn*H);
+    if(y < 0 || y >= H || x0 - 5*R < 0 || x0 + 5*R >= W) return null;
+    let top = 0, yel = 0;
+    for(let x = x0 - R; x <= x0 + R; x++){ top = Math.max(top, lum(x, y)); const p = (y*W + x)*ch; if(isYellow(px[p], px[p+1], px[p+2])) yel++; }
+    const a = [], b = []; for(let k = 3*R; k <= 5*R; k++){ a.push(lum(x0 - k, y)); b.push(lum(x0 + k, y)); }
+    return {paint:top - Math.max(med(a), med(b)) > 25 && top > 90, yellow:yel >= 2};
+  };
 }
 
-/* lane · road: 0/1 마스크(W×H), px: 픽셀(ch = 3 RGB 또는 4 RGBA), cx: 화면에서 내 차 가운데 x
-   → {rows, seen, pos(차로 안 위치 0~1), mid(내 차로 가운데 x), roadFrac(화면 높이 중 도로 비율),
-      left:{n, yellow}, right:{n}, laneLeft, laneRight}
-   laneLeft  = 내 차로 왼쪽에 있는 차로 수 (왼쪽 끝을 봤을 때만, 아니면 null)
-   laneRight = 오른쪽에 있는 차로 수 (오른쪽 끝을 봤을 때만) */
-export function readLanes(lane, road, px, W, H, cx, ch = 4){
-  const bottom = roadBottom(road, W, H, cx), rows = [];
-  for(let y = bottom - 4; y > bottom - 4 - BAND && y > 0; y -= STEP){
-    const segs = [];
-    for(let x = 0, start = -1; x <= W; x++){
-      const on = x < W && lane[y*W + x];
-      if(on && start < 0) start = x;
-      if(!on && start >= 0){
-        if(x - start <= SEG_MAX){
-          let yl = 0; for(let k = start; k < x; k++){ const p = (y*W + k)*ch; if(isYellow(px[p], px[p+1], px[p+2])) yl++; }
-          const c = (start + x - 1)/2;
-          // 선 바깥쪽이 곧 '달릴 수 없는 곳'인지 (길 끝 선)
-          let leftOff = 0, rightOff = 0;
-          for(let k = 1; k <= EDGE_GAP; k++){ if(start - k >= 0 && !road[y*W + start - k] && !lane[y*W + start - k]) leftOff++; if(x - 1 + k < W && !road[y*W + x - 1 + k] && !lane[y*W + x - 1 + k]) rightOff++; }
-          segs.push({x:c, yellow:yl/(x - start) > .25, offL:leftOff > EDGE_GAP*.6 || start <= 1, offR:rightOff > EDGE_GAP*.6 || x >= W - 1});
-        }
-        start = -1;
-      }
-    }
-    const L = segs.filter(s => s.x < cx).reverse(), R = segs.filter(s => s.x >= cx);   // 둘 다 가까운 것부터
-    rows.push({y, L, R});
+// 선 위의 y(0~1)에서 x. 선 끝보다 아래면 맨 아래 두 점으로 늘려서
+function xAt(pts, y){
+  for(let i = 1; i < pts.length; i++){
+    const [xa, ya] = pts[i-1], [xb, yb] = pts[i];
+    if((ya - y)*(yb - y) <= 0 && ya !== yb) return xa + (xb - xa)*(y - ya)/(yb - ya);
   }
-  // 줄마다: 왼쪽 끝 선(노란선 또는 바깥이 길 아님)까지 몇 개 / 오른쪽 끝 선까지 몇 개
-  const endAt = (list, side) => list.findIndex(s => side < 0 ? (s.yellow || s.offL) : s.offR);
-  const vals = rows.filter(r => r.L.length && r.R.length);
-  const med = a => { if(!a.length) return null; const b = a.slice().sort((p, q) => p - q); return b[b.length >> 1]; };
-  // 차로 안 위치: 띠의 아래쪽 절반(차에 가까운 쪽)에서
-  const near = rows.length ? rows[0].y - BAND/2 : 0;
-  const nearRows = vals.filter(r => r.y >= near);
-  const pos = med(nearRows.map(r => (cx - r.L[0].x)/(r.R[0].x - r.L[0].x))), mid = med(nearRows.map(r => (r.L[0].x + r.R[0].x)/2));
-  // 화면에서 도로가 차지하는 높이: 가운데 1/3 폭에서 '달릴 수 있는 곳'이 20% 넘는 줄 수 (폰이 너무 하늘을 보면 작다)
-  let roadRows = 0;
-  for(let y = 0; y < H; y += 2){ let c = 0; for(let x = W/3 | 0; x < 2*W/3; x += 4) c += road[y*W + x]; if(c > W/3/4*.2) roadRows += 2; }
-  // 끝 선까지 개수: 끝 선이 보인 줄이 충분히 많을 때만 (조각 하나로 판단 안 함)
-  // 옆 차로의 차도 '달릴 수 없는 곳'으로 나와 길 끝처럼 보이므로, 다른 줄에서 그 바깥에 선이 보이면 길 끝이 아님
-  const side = (key, sgn) => {
-    const hits = vals.map(r => endAt(r[key], sgn)).filter(i => i >= 0);
-    if(hits.length < Math.max(3, vals.length*.4)) return null;
-    const k = med(hits), beyond = vals.filter(r => r[key].length > k + 1).length;
-    return beyond > vals.length*.25 ? null : k;
+  const [xa, ya] = pts[0], [xb, yb] = pts[1];
+  return ya === yb ? xa : xa + (xb - xa)*(y - ya)/(yb - ya);
+}
+
+/* 선 종류: 아래쪽(가까운) 구간을 따라 칠이 있는 비율 · 끊긴 횟수 → 'yellow' | 'solid' | 'dashed' | 'edge'(칠 없는 경계) | null(모름)
+   반폭은 가까울수록 넓게 (보닛 바로 위 화면 폭의 0.6% → 소실점 쪽으로 줄어듦) */
+function lineKind(pts, probe, yRef, vp){
+  const P = pts.filter(([, y]) => y <= yRef + .01 && y >= vp + (yRef - vp)*.35);
+  if(P.length < 6) return null;
+  let n = 0, paint = 0, yel = 0, flips = 0, prev = null;
+  for(const [x, y] of P){
+    const s = probe(x, y, .006*Math.max(.25, (y - vp)/(yRef - vp)));
+    if(!s) continue;
+    n++; if(s.paint) paint++; if(s.yellow) yel++;
+    if(prev !== null && prev !== s.paint) flips++;
+    prev = s.paint;
+  }
+  if(n < 6) return null;
+  if(yel/n >= .3) return 'yellow';
+  const f = paint/n;
+  if(f >= .8) return 'solid';
+  if(f >= .15 && f <= .7 && flips >= 2) return 'dashed';
+  if(f < .1) return 'edge';   // 칠이 거의 없음 = 연석 · 가드레일 · 벽 밑 같은 도로 경계
+  return null;
+}
+
+/* lanes: [{pts:[[x, y]…] 화면 기준 0~1 · 아래→위, score}]
+   o = {cx: 화면에서 내 차 가운데 x, yRef: 선 위치를 재는 줄(보닛 바로 위), vp: 소실점 높이, probe: paintSampler 결과(없으면 종류 안 봄), laneW: 평소 차로 폭(yRef에서, 모르면 null)}
+   → {n, lines:[{x, kind, score}] 왼→오, li: 내 차로 왼쪽 선 번호(-1 = 없음), L, R, pos(0 왼쪽 선 ~ 1 오른쪽 선), width, mid, fromL, fromR}
+   fromL/fromR = [끝에서 몇 번째 차로(1~), 무게] 또는 null — 이 한 장의 근거 */
+export function readLines(lanes, {cx = .5, yRef = .9, vp = .55, probe = null, laneW = null} = {}){
+  const lines = lanes.filter(l => l.pts.length >= 2)
+    .map(l => ({x:xAt(l.pts, yRef), kind:probe ? lineKind(l.pts, probe, yRef, vp) : null, score:l.score}))
+    .sort((a, b) => a.x - b.x);
+  const li = lines.findLastIndex(s => s.x < cx), L = li >= 0 ? lines[li] : null, R = lines[li + 1] || null;
+  const width = L && R ? R.x - L.x : null, w = width || laneW;
+  const r = {n:lines.length, lines, li, L, R, cx, width, pos:width ? (cx - L.x)/width : null, mid:width ? (L.x + R.x)/2 : null, fromL:null, fromR:null};
+  if(!w) return r;
+  // 한쪽 끝까지: 내 차로 선부터 바깥으로 k번째 선을 본다 (가까운 것부터, 최대 3개)
+  //   노란선 → 왼쪽이면 그 안쪽이 끝 차로(강함) / 점선 → 너머에 차로가 더 있음 / 칠 없는 경계 → 그 안쪽이 끝 차로
+  //   흰 실선 → 바깥 차로 폭 70% 너머에 칠한 선이 또 있으면 차로 변경 금지 실선이라 계속, 아니면(갓길 · 경계뿐) 끝 차로
+  const W8 = [.5, .3, .2];
+  const side = (sgn) => {
+    const seq = sgn < 0 ? lines.slice(0, li + 1).reverse() : lines.slice(li + 1);
+    for(let k = 0; k < seq.length && k < 3; k++){
+      const s = seq[k], next = seq[k + 1];
+      if(s.kind === 'yellow') return sgn < 0 ? [k + 1, 1] : [k + 1, W8[k]];   // 왼쪽 = 중앙선(강함) · 오른쪽 = 주정차 금지 연석선(길 끝)
+      if(s.kind === 'dashed') continue;
+      if(s.kind === 'edge') return [k + 1, k ? W8[k] : .3];         // 점선 너머 경계 = 그 사이가 끝 차로. 내 차로 선이 곧 경계면(칠 없는 길) 약하게
+      if(s.kind !== 'solid') return null;
+      const paintNext = next && next.kind && next.kind !== 'edge' && Math.abs(next.x - s.x) > .7*w;
+      if(paintNext) continue;
+      return [k + 1, W8[k]];
+    }
+    return null;
   };
-  const yellowL = vals.filter(r => r.L[0].yellow).length;
-  return {
-    rows:rows.length, seen:vals.length, pos, mid, roadFrac:roadRows/H,
-    left:{n:med(vals.map(r => r.L.length)), yellow:vals.length > 0 && yellowL >= vals.length*.4},
-    right:{n:med(vals.map(r => r.R.length))},
-    laneLeft:side('L', -1), laneRight:side('R', 1)
-  };
+  r.fromL = side(-1); r.fromR = side(1);
+  return r;
 }
 
 /* ---------- 여러 장 추적 ----------
-   update(read, nLanes) → {idx: 왼쪽부터 몇 번째 차로(1~) 또는 null, sure, changes, last}
-   · 판정: 왼쪽 끝이 보이면 laneLeft + 1, 아니면 오른쪽 끝 + 지도 차로 수(nLanes)로 nLanes − laneRight
-   · 최근 VOTE장 중 VOTE_MIN장 넘게 판정이 있고 같은 답이 70% 넘으면 그 차로로 확정
-   · 내 차로 안 위치가 오른쪽 끝(0.75↑) → 바로 다음에 왼쪽 끝(0.25↓) = 오른쪽으로 한 칸 (반대도 같음) */
-const VOTE = 15, VOTE_MIN = 8, AGREE = .7;
+   update(read, t(ms)) → T {fromL, fromR: 왼쪽·오른쪽 끝에서 몇 번째(확정된 값 또는 null), changes, last}
+   idx(nLanes) → 왼쪽부터 몇 번째: fromL이 있으면 그대로, 없으면 nLanes − fromR + 1 (HUD가 그리는 차로 수) · count() → 카메라로 센 차로 수
+   · 근거 표(왼쪽·오른쪽 따로): 새 근거가 오면 그쪽 기존 무게 × DECAY 후 더함. 근거가 없어도 시간이 지나면 천천히 옅어짐(반감 HALF_MS)
+     → 정차 · 가림 동안은 유지, 길이 바뀌고 근거가 안 오면 '모름'으로 돌아감. 회전 · 진출입을 마치면 reset
+   · 확정: 1등 무게 SURE_W 이상 + 전체의 SURE_SHARE 이상
+   · 차로 변경: 내 차에 가장 가까운 선을 따라가다 그 선이 내 차 가운데를 차로 폭 10% 넘게 지나 반대편으로 가면 한 칸. 근거 표도 한 칸 옮김
+     직전 장과 CHANGE_MS(폰이 느려 장 간격이 길면 그 2.5배) 넘게 떨어졌거나 차로 폭이 크게 다르면(교차로 · 갈림) 세지 않음 */
+const DECAY = .97, SURE_W = 2, SURE_SHARE = .6, CHANGE_MS = 1000, HALF_MS = 45000;
 export function createLaneTracker(){
-  const T = {idx:null, sure:false, votes:[], prevPos:null, changes:0, last:null};
-  function update(r, nLanes){
-    let m = null;
-    if(r.laneLeft !== null) m = r.laneLeft + 1;
-    else if(r.laneRight !== null && nLanes) m = nLanes - r.laneRight;
-    if(m !== null && m >= 1){ T.votes.push(m); if(T.votes.length > VOTE) T.votes.shift(); }
-    if(T.votes.length >= VOTE_MIN){
-      const cnt = new Map(); T.votes.forEach(v => cnt.set(v, (cnt.get(v) || 0) + 1));
-      const [best, c] = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
-      if(c/T.votes.length >= AGREE){ T.idx = best; T.sure = true; }
+  const T = {fromL:null, fromR:null, vL:new Map(), vR:new Map(), prev:null, changes:0, last:null, lastT:0, laneW:null, t:null, dt:200};
+  const shift = (m, d) => { const v = new Map(); m.forEach((w, k) => { if(k + d >= 1) v.set(k + d, w); }); return v; };
+  const add = (m, e) => { if(!e) return; m.forEach((w, k) => m.set(k, w*DECAY)); m.set(e[0], (m.get(e[0]) || 0) + e[1]); };
+  const pick = m => { let b = null, bw = 0, s = 0; m.forEach((w, k) => { s += w; if(w > bw){ bw = w; b = k; } }); return b !== null && bw >= SURE_W && bw/s >= SURE_SHARE ? b : null; };
+  function update(r, t = 0){
+    if(T.t !== null && t > T.t){
+      const f = Math.pow(.5, (t - T.t)/HALF_MS); T.vL.forEach((w, k) => T.vL.set(k, w*f)); T.vR.forEach((w, k) => T.vR.set(k, w*f));
+      T.dt += (Math.min(3000, t - T.t) - T.dt)*.1;
     }
-    if(r.pos !== null){
-      if(T.prevPos !== null && T.idx !== null){
-        const d = T.prevPos > .75 && r.pos < .25 ? 1 : T.prevPos < .25 && r.pos > .75 ? -1 : 0;
-        if(d){ T.idx = Math.max(1, T.idx + d); T.changes++; T.last = d; T.votes = []; }   // 바뀐 뒤엔 새로 모은다
+    T.t = t;
+    if(r.width) T.laneW = T.laneW ? T.laneW + (r.width - T.laneW)*.05 : r.width;
+    // 차로 변경: 내 차에 가장 가까운 선을 장마다 따라가다가(위치가 차로 폭 30% 안에서 이어지면 같은 선)
+    // 그 선이 내 차 가운데를 차로 폭 10% 넘게 지나 반대편으로 가면 한 칸 (걸친 동안 잡음으로 깜빡여도 한 번만)
+    const w = T.laneW, cx = r.cx;
+    if(w && cx != null && r.lines.length){
+      const p = T.prev, near = r.lines.reduce((b, s) => Math.abs(s.x - cx) < Math.abs(b.x - cx) ? s : b);
+      const m = p && t - p.t <= Math.max(CHANGE_MS, 2.5*T.dt) ? r.lines.reduce((b, s) => Math.abs(s.x - p.x) < Math.abs(b.x - p.x) ? s : b) : null;
+      if(m && Math.abs(m.x - p.x) < .3*w && (m === near || Math.abs(m.x - cx) < .1*w)){
+        let side = p.side;
+        if(m.x < cx - .1*w) side = -1; else if(m.x > cx + .1*w) side = 1;
+        // 셀 때 조건: 이 선을 0.8초 넘게(2장 이상) 이어 봤고(혼자 튀는 가짜 선 거르기) 이번 장 내 차로 폭이 평소와 비슷
+        // (새 차로 바깥 선이 가려져 폭을 못 재면 1.6초 넘게 이어 본 선일 때만)
+        const seen = t - p.t0, ok = p.age >= 2 && (r.width ? seen >= 800 && Math.abs(r.width - w) < .35*w : seen >= 1600);
+        if(side !== p.side && ok){
+          const d = p.side > 0 ? 1 : -1;   // 오른쪽에 있던 선이 왼쪽으로 = 내가 오른쪽으로 감
+          T.vL = shift(T.vL, d); T.vR = shift(T.vR, -d);
+          if(T.fromL !== null) T.fromL = Math.max(1, T.fromL + d);
+          if(T.fromR !== null) T.fromR = Math.max(1, T.fromR - d);
+          T.changes++; T.last = d; T.lastT = t;
+        }
+        T.prev = {x:m.x, side:ok ? side : p.side, t, t0:p.t0, age:p.age + 1};
       }
-      T.prevPos = r.pos;
+      // 따라가던 선을 놓쳤거나 다른 선이 더 가까워졌으면 그 선으로 갈아탐 (걸쳐 있지 않을 때만)
+      else T.prev = Math.abs(near.x - cx) < .6*w ? {x:near.x, side:near.x < cx ? -1 : 1, t, t0:t, age:1} : null;
     }
+    add(T.vL, r.fromL); add(T.vR, r.fromR);
+    // 확정 값은 근거 표가 다시 확정할 때까지 유지하되, 무게가 다 옅어지면(길이 바뀜) 모름
+    const a = pick(T.vL), b = pick(T.vR), tot = m => { let s = 0; m.forEach(w => { s += w; }); return s; };
+    T.fromL = a !== null ? a : tot(T.vL) < .5 ? null : T.fromL;
+    T.fromR = b !== null ? b : tot(T.vR) < .5 ? null : T.fromR;
     return T;
   }
-  function reset(){ Object.assign(T, {idx:null, sure:false, votes:[], prevPos:null, changes:0, last:null}); }
-  return {T, update, reset};
+  // 양쪽을 다 알고 지도 차로 수와 안 맞으면 근거가 더 쌓인 쪽을 믿는다
+  const top = m => { let b = 0; m.forEach(w => { b = Math.max(b, w); }); return b; };
+  function idx(nLanes){
+    const l = T.fromL, r = T.fromR !== null && nLanes ? Math.max(1, nLanes - T.fromR + 1) : null;
+    if(l !== null && r !== null && Math.min(l, nLanes) !== r) return top(T.vR) > top(T.vL) ? r : Math.min(l, nLanes);
+    if(l !== null) return nLanes ? Math.min(l, nLanes) : l;
+    return r;
+  }
+  // 카메라로 센 한 방향 차로 수: 양쪽 끝을 다 알 때만 (왼쪽에서 몇 번째 + 오른쪽에서 몇 번째 − 1)
+  const count = () => T.fromL !== null && T.fromR !== null ? T.fromL + T.fromR - 1 : null;
+  function reset(){ Object.assign(T, {fromL:null, fromR:null, vL:new Map(), vR:new Map(), prev:null, changes:0, last:null, lastT:0, laneW:null, t:null, dt:200}); }
+  return {T, update, idx, count, reset};
 }

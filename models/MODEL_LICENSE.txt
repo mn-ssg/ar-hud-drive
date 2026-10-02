@@ -1,0 +1,30 @@
+models/clrernet_culane_dla34.onnx — CLRerNet (차선 검출, DLA34, CULane 학습) 사전학습 모델
+
+원본: https://github.com/hirotomusiker/CLRerNet  (Hiroto Honda, Yusuke Uchida — "CLRerNet: Improving Confidence of Lane Detection with LaneIoU", 2023)
+      학습 가중치 clrernet_culane_dla34_ema.pth, Apache License 2.0
+ONNX 변환본: https://github.com/PINTO0309/PINTO_model_zoo/tree/main/401_CLRerNet  (clrernet_no_nms_no_predictions_to_lanes_320x800.onnx, Apache License 2.0)
+
+이 저장소에서 바꾼 것 (2026-10-02, AR-HUD 수업 과제용):
+  1. 모델 안의 점수 거르기(0.43)를 없앰 → 후보 192개를 늘 내보내고, 거르기 · NMS · 선 만들기는 js/clrernet.js에서
+     (후보가 0개일 때 브라우저 WebGPU에서 GatherND 오류가 나서)
+  2. 가중치를 float16으로 저장하고 불러올 때 float32로 바꾸는 Cast를 붙임 → 파일 63MB → 32MB, 계산은 float32 그대로
+     (원본과 출력 차이: 선 x 최대 0.0006 = 800px 기준 0.5px)
+
+학습 데이터 CULane(https://xingangpan.github.io/projects/CULane.html)은 연구 · 교육 목적 공개 데이터셋이다.
+이 모델은 비상업 수업 과제(디지털미디어 프로토타이핑)의 시제품에서만 쓴다.
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

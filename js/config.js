@@ -39,7 +39,8 @@ export const LANE_LEAD = 300;         // 차로 안내 지점 이 거리(m) 앞�
 
 /* ---------- 카메라 차선 인식 (lanecam.js · laneread.js) ---------- */
 export const LANE_FPS = 5;            // 초당 최대 몇 번 차선을 읽나 (폰이 느리면 저절로 줄어듦)
-export const ROAD_SMALL = .15;        // 화면 높이 중 도로가 이보다 작게 보이면 '폰을 조금 아래로' 안내
+export const LANE_CONF = .3;          // CLRerNet 선 점수가 이보다 낮으면 버림 (원본 0.43은 화면 녹화 영상에서 선을 자주 놓쳐서 낮춤, E19)
+export const ROAD_SMALL = .15;        // 화면 높이 중 도로 띠(소실점 ~ 보닛)가 이보다 작으면 '폰을 조금 아래로' 안내
 
 /* ---------- 화면 ---------- */
 export const HUD_FPS = 30;            // HUD를 초당 다시 그리는 횟수. 휴대폰 발열·끊김을 줄인다

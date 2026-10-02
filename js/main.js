@@ -5,7 +5,7 @@
    · 매 프레임: 가상 주행 → 경로 위 위치 → HUD · 정보 패널 (1초마다 주행 기록)
    · 카메라 차선 인식(lanecam.js)은 따로 돌고, 읽은 내 차로를 HUD가 가져다 쓴다
    ============================================================ */
-import {HUD_FPS, OFF_ROUTE, JCT_TMAP_M, DONE_OFF, DONE_ANG, ROAD_SMALL} from './config.js';
+import {HUD_FPS, OFF_ROUTE, JCT_TMAP_M, DONE_OFF, DONE_ANG, ROAD_SMALL, DEFAULT_LANES} from './config.js';
 import {pointAt, angleDiff} from './geo.js';
 import {$, store} from './util.js';
 import {searchPlaces, fetchRoute, fetchSpeedLimits} from './tmap.js';
@@ -18,9 +18,9 @@ import {createNav} from './nav.js';
 import {startCamera, watchGPS, keepAwake, releaseAwake} from './device.js';
 import {initHud, resetHud, drawHud} from './hud.js';
 import {startLog, endLog, logRoute, logTick, flushLog, logStatus, hasLog, exportLog} from './log.js';
-import {LC, startLaneCam, stopLaneCam, setLaneCount} from './lanecam.js';
+import {LC, startLaneCam, stopLaneCam, setLaneCount, setSpeed, resetLaneTrack} from './lanecam.js';
 
-const A = {key:'', dest:null, gps:null, running:false, laneHud:store.get('laneHud') === '1'};   // laneHud: 카메라로 읽은 내 차로를 HUD에 쓸지 (정확도 확인 전이라 기본 끔)
+const A = {key:'', dest:null, gps:null, running:false, laneHud:store.get('laneHudOn') !== '0'};   // laneHud: 카메라로 읽은 내 차로를 HUD에 쓸지 (10-02부터 기본 켬 D46 — 끔이면 녹화 때 아무 데도 안 보여서. 예전 'laneHud' 저장값은 안 읽음)
 const estimate = createSpeedEstimator(), smoothKmh = createSmoother(0.4);
 const nav = createNav(pos => loadRoute(pos));
 
@@ -84,7 +84,7 @@ function waitGPS(ms){
 /* ============================================================
    매 프레임 (HUD_FPS로 제한)
    ============================================================ */
-let lastDraw = 0, lastLog = 0;
+let lastDraw = 0, lastLog = 0, lastWord = '';
 function frame(now){
   if(!A.running) return;
   requestAnimationFrame(frame);
@@ -98,9 +98,11 @@ function frame(now){
   const kmh = smoothKmh(N.pos ? (N.pos.v || 0)*3.6 : 0, now);
   // 회전 '완료' 확인용: 경로선 가까이 + 달리는 중이면 진행 방향이 경로 방향과 맞음
   const P = N.pos, onTrack = !!(onRoute && N.fix.off <= DONE_OFF && !(P && P.v > 3 && P.heading != null && angleDiff(P.heading, pointAt(R.pts, R.cum, s).heading) > DONE_ANG));
-  setLaneCount(lanes);
+  setLaneCount(lanes || DEFAULT_LANES); setSpeed(kmh);   // 오른쪽 끝에서 센 차로를 HUD가 그리는 차로 수 기준으로 바꿈
   const laneIdx = A.laneHud && LC.sure ? LC.idx : null;
   const st = drawHud(now, {route:R, s, offSince:N.offSince, onTrack, kmh, limit, lanes, laneIdx}), laneSrc = nl ? '노드링크' : 'OSM';
+  if(st.word === '완료' && lastWord !== '완료') resetLaneTrack();   // 회전 · 진출입을 마치면 다른 길 → 카메라 차로 근거를 새로 모음
+  lastWord = st.word;
   if(now - lastLog >= 1000){
     lastLog = now;
     logTick({pos:N.pos, s, off:N.fix ? N.fix.off : null, limit, lanes, laneSrc, word:st.word, m:st.m, d:st.d, j:st.j, dj:st.dj, cam:LC, camHud:!!laneIdx});
@@ -130,9 +132,9 @@ function drawPanel(now, s, st, limit, lanes, laneSrc){
   else if(A.gps) parts.push('GPS 오차 ' + Math.round(A.gps.acc) + 'm');
   // 카메라 차선 인식
   if(LC.state === 'on'){
-    const r = LC.read;
-    parts.push((LC.sure ? `카메라: ${LC.idx}차로` : '카메라: 내 차로 모름') + ` · 인식 ${LC.fps.toFixed(0)}fps`);
-    if(r && r.roadFrac < ROAD_SMALL) parts.push('도로가 화면에 작게 보여요 → 폰을 조금 아래로');
+    const ends = [LC.fromL !== null ? `왼쪽에서 ${LC.fromL}` : '', LC.fromR !== null ? `오른쪽에서 ${LC.fromR}` : ''].filter(Boolean).join(' · ');
+    parts.push((LC.sure ? `카메라: ${LC.idx}차로` : '카메라: 내 차로 모름') + (ends ? ` (${ends}${LC.count ? ` · ${LC.count}차로 길` : ''})` : '') + ` · 인식 ${LC.fps.toFixed(0)}fps`);
+    if(LC.road !== null && LC.road < ROAD_SMALL) parts.push('도로가 화면에 작게 보여요 → 폰을 조금 아래로');
   }
   else if(LC.state === 'loading') parts.push('차선 인식 준비 중');
   else if(LC.state === 'fail') parts.push('차선 인식 못 함: ' + LC.error);
@@ -245,7 +247,7 @@ async function onExport(e){
 $('#logBtn').addEventListener('click', onExport);
 // 카메라로 읽은 내 차로를 HUD에 쓸지: 끄면 패널에만 보이고 HUD는 내 차로를 가운데에(D39)
 const laneHudText = () => { $('#laneHudBtn').textContent = 'HUD에 카메라 차로: ' + (A.laneHud ? '켬' : '끔'); };
-$('#laneHudBtn').addEventListener('click', () => { A.laneHud = !A.laneHud; store.set('laneHud', A.laneHud ? '1' : '0'); laneHudText(); });
+$('#laneHudBtn').addEventListener('click', () => { A.laneHud = !A.laneHud; store.set('laneHudOn', A.laneHud ? '1' : '0'); laneHudText(); });
 laneHudText();
 $('#oldLogBtn').addEventListener('click', onExport);
 $('#oldLogBtn').hidden = !hasLog();

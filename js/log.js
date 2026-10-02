@@ -64,12 +64,13 @@ export function logTick(e){
   }));
 }
 
-// 카메라 차선 인식 한 줄: 확정 차로 · 이번 판정(왼쪽/오른쪽 끝까지 차로 수) · 선 개수 · 차로 안 위치 · 도로가 보인 비율 · 속도
+// 카메라 차선 인식 한 줄: 확정 차로 · 왼쪽/오른쪽 끝에서 몇 번째 · 카메라로 센 차로 수 · 이번 장의 근거 · 선(위치 · 종류) · 차로 안 위치 · 화면 맞춤 · 속도
 function camOut(c){
   if(!c || c.state !== 'on') return c ? {st:c.state} : null;
-  const r = c.read || {};
-  return {idx:c.sure ? c.idx : null, chg:c.changes, ll:r.laneLeft ?? null, lr:r.laneRight ?? null, nl:r.left ? r.left.n : null, nr:r.right ? r.right.n : null,
-    yl:r.left ? r.left.yellow : null, pos:r2(r.pos), road:r2(r.roadFrac), ms:Math.round(c.ms), fps:r1(c.fps), be:c.backend};
+  const r = c.read || {}, g = c.geom || {};
+  return {idx:c.idx, fl:c.fromL, fr:c.fromR, cnt:c.count, chg:c.changes, el:r.fromL || null, er:r.fromR || null,
+    ln:(r.lines || []).map(s => [r2(s.x), s.kind ? s.kind[0] : '?']), li:r.li ?? null, pos:r2(r.pos),
+    cx:r2(g.cx), vp:r2(g.vp), hood:r2(g.hood), ms:Math.round(c.ms), fps:r1(c.fps), be:c.backend};
 }
 
 /* ---------- 저장: 자리가 모자라면 오래된 주행부터 지운다. 이번 주행만으로도 모자라면 메모리에만 둔다 ---------- */
